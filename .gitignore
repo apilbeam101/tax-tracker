@@ -1,0 +1,13 @@
+node_modules/
+dist/
+data/
+.env
+*.db
+*.db-wal
+*.db-shm
+.claude/
+CLAUDE.md
+src/shared/*.js
+src/shared/*.js.map
+src/shared/*.d.ts
+src/shared/*.d.ts.map
