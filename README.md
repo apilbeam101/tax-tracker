@@ -36,7 +36,7 @@ After install, open a new terminal for the `node` and `npm` commands to be avail
 ### 1. Clone and install
 
 ```bash
-git clone <repo-url> tax-tracker
+git clone [<repo-url>](https://github.com/apilbeam101/tax-tracker.git) tax-tracker
 cd tax-tracker
 npm install
 ```
