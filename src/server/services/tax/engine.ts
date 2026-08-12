@@ -12,12 +12,13 @@
  * Run scripts/backfill-fx.ts first if importing from Ghostfolio or other
  * sources that don't include GBP values.
  */
+
+import type { TaxYearConfig } from '../../../shared/types.ts'
 import type { TransactionStore } from '../../repositories/index.ts'
 import type { CgtDisposalStore } from '../../repositories/sqlite/CgtDisposalStore.ts'
 import type { S104PoolStore } from '../../repositories/sqlite/S104PoolStore.ts'
-import type { TaxYearConfig } from '../../../shared/types.ts'
-import { matchDisposals, taxYearForDate } from './matching.ts'
 import { buildCgtSummary } from './cgt_summary.ts'
+import { matchDisposals } from './matching.ts'
 
 export interface TaxEngineResult {
   instrumentsProcessed: number
@@ -44,7 +45,7 @@ export function runTaxEngine(
   taxYearConfigs: TaxYearConfig[],
   incomeByYear: Record<string, string> = {},
 ): TaxEngineResult {
-  const configByYear = new Map(taxYearConfigs.map(c => [c.taxYear, c]))
+  const configByYear = new Map(taxYearConfigs.map((c) => [c.taxYear, c]))
 
   // Get all transactions for this tenant, sorted by date
   const allTxns = transactions.list(tenantId)
@@ -110,7 +111,10 @@ export function runTaxEngineForInstrument(
   transactions: TransactionStore,
   disposalStore: CgtDisposalStore,
   poolStore: S104PoolStore,
-): { disposals: ReturnType<typeof matchDisposals>['disposals']; pool: ReturnType<typeof matchDisposals>['pool'] } {
+): {
+  disposals: ReturnType<typeof matchDisposals>['disposals']
+  pool: ReturnType<typeof matchDisposals>['pool']
+} {
   const txns = transactions.list(tenantId, { instrumentId })
   const { disposals, pool } = matchDisposals(txns)
 

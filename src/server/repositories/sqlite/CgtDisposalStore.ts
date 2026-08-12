@@ -1,5 +1,5 @@
-import type { Db } from '../../db/database.ts'
 import type { MatchType } from '../../../shared/types.ts'
+import type { Db } from '../../db/database.ts'
 import type { CgtDisposalRecord } from '../../services/tax/matching.ts'
 
 export interface CgtDisposalStore {
@@ -92,7 +92,11 @@ export function createCgtDisposalStore(db: Db): CgtDisposalStore {
         }
         db.exec('COMMIT')
       } catch (err) {
-        try { db.exec('ROLLBACK') } catch { /* ignore */ }
+        try {
+          db.exec('ROLLBACK')
+        } catch {
+          /* ignore */
+        }
         throw err
       }
     },

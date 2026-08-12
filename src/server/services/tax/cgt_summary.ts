@@ -16,8 +16,13 @@
  */
 import Big from 'big.js'
 
-function bigMin(a: Big, b: Big): Big { return a.lt(b) ? a : b }
-function bigMax(a: Big, b: Big): Big { return a.gt(b) ? a : b }
+function bigMin(a: Big, b: Big): Big {
+  return a.lt(b) ? a : b
+}
+function bigMax(a: Big, b: Big): Big {
+  return a.gt(b) ? a : b
+}
+
 import type { TaxYearConfig } from '../../../shared/types.ts'
 import type { CgtDisposalRecord } from './matching.ts'
 
@@ -177,7 +182,8 @@ function computeEstimatedTax(
 ): Big {
   if (!splitDate || config.cgtBasicRatePre === null) {
     // No split: use post-change (or only) rates
-    return gainInBasicBand.times(config.cgtBasicRate)
+    return gainInBasicBand
+      .times(config.cgtBasicRate)
       .plus(gainInHigherBand.times(config.cgtHigherRate))
   }
 
@@ -190,9 +196,11 @@ function computeEstimatedTax(
   const preHigherGain = gainInHigherBand.times(preWeight)
   const postHigherGain = gainInHigherBand.times(postWeight)
 
-  const preTax = preBasicGain.times(config.cgtBasicRatePre!)
+  const preTax = preBasicGain
+    .times(config.cgtBasicRatePre!)
     .plus(preHigherGain.times(config.cgtHigherRatePre!))
-  const postTax = postBasicGain.times(config.cgtBasicRate)
+  const postTax = postBasicGain
+    .times(config.cgtBasicRate)
     .plus(postHigherGain.times(config.cgtHigherRate))
 
   return preTax.plus(postTax)

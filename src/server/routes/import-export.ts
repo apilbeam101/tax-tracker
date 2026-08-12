@@ -14,18 +14,17 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify'
-import { mapCsvToTransactions, validRows, toCreateBody } from '../services/import/csv-mapper.ts'
-import type { ColumnMapping } from '../services/import/csv-mapper.ts'
-import { toCgtCalculatorRows, formatCgtCalculator } from '../services/export/cgtcalculator.ts'
-import { transactionsToCsv, disposalsToCsv } from '../services/export/csv.ts'
+import type { CreateTransactionBody, Instrument } from '../../shared/types.ts'
+import { formatCgtCalculator, toCgtCalculatorRows } from '../services/export/cgtcalculator.ts'
+import { disposalsToCsv, transactionsToCsv } from '../services/export/csv.ts'
+import type { DividendRow, HoldingRow } from '../services/export/pdf.ts'
 import { generateAnnualReportPdf } from '../services/export/pdf.ts'
-import type { HoldingRow, DividendRow } from '../services/export/pdf.ts'
-import type { Instrument } from '../../shared/types.ts'
+import type { ColumnMapping, MappedRow } from '../services/import/csv-mapper.ts'
+import { mapCsvToTransactions, toCreateBody, validRows } from '../services/import/csv-mapper.ts'
 import { buildCgtSummary } from '../services/tax/cgt_summary.ts'
 import { computeDividendTax } from '../services/tax/dividends.ts'
 import { taxYearForDate } from '../services/tax/matching.ts'
-import type { CreateTransactionBody } from '../../shared/types.ts'
-import { recalcInstrument, linkRealisedProjection } from '../services/tax/recalc.ts'
+import { linkRealisedProjection, recalcInstrument } from '../services/tax/recalc.ts'
 
 // Shared helper used in transactions route — duplicated here to avoid coupling
 async function computeAndPersistGbpFields(
@@ -69,7 +68,9 @@ async function computeAndPersistGbpFields(
     update.fxRateType = fxRateRecord.rateType as import('../../shared/types.ts').FxRateType
   }
 
-  const isBuy = ['BUY', 'RSU_VEST', 'ESPP_PURCHASE', 'TRANSFER_IN', 'RIGHTS_ISSUE'].includes(body.txnType)
+  const isBuy = ['BUY', 'RSU_VEST', 'ESPP_PURCHASE', 'TRANSFER_IN', 'RIGHTS_ISSUE'].includes(
+    body.txnType,
+  )
   update.netGbp = isBuy
     ? totalGbp.plus(costsGbp).neg().toFixed(8)
     : totalGbp.minus(costsGbp).toFixed(8)
@@ -80,23 +81,38 @@ async function computeAndPersistGbpFields(
 // ── Route schema types ────────────────────────────────────────────────────────
 
 interface TaxYearConfigRow {
-  tax_year: string; start_date: string; end_date: string
-  cgt_annual_exempt: string; cgt_basic_rate: string; cgt_higher_rate: string
-  cgt_basic_rate_pre: string | null; cgt_higher_rate_pre: string | null
-  cgt_rate_change_date: string | null; dividend_allowance: string
-  dividend_basic_rate: string; dividend_higher_rate: string
-  dividend_addl_rate: string; cgt_proceeds_threshold: string
+  tax_year: string
+  start_date: string
+  end_date: string
+  cgt_annual_exempt: string
+  cgt_basic_rate: string
+  cgt_higher_rate: string
+  cgt_basic_rate_pre: string | null
+  cgt_higher_rate_pre: string | null
+  cgt_rate_change_date: string | null
+  dividend_allowance: string
+  dividend_basic_rate: string
+  dividend_higher_rate: string
+  dividend_addl_rate: string
+  cgt_proceeds_threshold: string
   income_basic_rate_limit: string
 }
 
 function toTaxYearConfig(row: TaxYearConfigRow) {
   return {
-    taxYear: row.tax_year, startDate: row.start_date, endDate: row.end_date,
-    cgtAnnualExempt: row.cgt_annual_exempt, cgtBasicRate: row.cgt_basic_rate,
-    cgtHigherRate: row.cgt_higher_rate, cgtBasicRatePre: row.cgt_basic_rate_pre,
-    cgtHigherRatePre: row.cgt_higher_rate_pre, cgtRateChangeDate: row.cgt_rate_change_date,
-    dividendAllowance: row.dividend_allowance, dividendBasicRate: row.dividend_basic_rate,
-    dividendHigherRate: row.dividend_higher_rate, dividendAddlRate: row.dividend_addl_rate,
+    taxYear: row.tax_year,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    cgtAnnualExempt: row.cgt_annual_exempt,
+    cgtBasicRate: row.cgt_basic_rate,
+    cgtHigherRate: row.cgt_higher_rate,
+    cgtBasicRatePre: row.cgt_basic_rate_pre,
+    cgtHigherRatePre: row.cgt_higher_rate_pre,
+    cgtRateChangeDate: row.cgt_rate_change_date,
+    dividendAllowance: row.dividend_allowance,
+    dividendBasicRate: row.dividend_basic_rate,
+    dividendHigherRate: row.dividend_higher_rate,
+    dividendAddlRate: row.dividend_addl_rate,
     cgtProceedsThreshold: row.cgt_proceeds_threshold,
     incomeBasicRateLimit: row.income_basic_rate_limit,
   }
@@ -117,7 +133,7 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
           type: 'object',
           required: ['csvText', 'mappings'],
           properties: {
-            csvText:   { type: 'string', maxLength: 5_000_000 },
+            csvText: { type: 'string', maxLength: 5_000_000 },
             hasHeader: { type: 'boolean' },
             mappings: {
               type: 'array',
@@ -125,8 +141,8 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
                 type: 'object',
                 required: ['source', 'target'],
                 properties: {
-                  source:    { oneOf: [{ type: 'string' }, { type: 'integer' }] },
-                  target:    { type: 'string' },
+                  source: { oneOf: [{ type: 'string' }, { type: 'integer' }] },
+                  target: { type: 'string' },
                   transform: { type: 'object' },
                 },
               },
@@ -137,7 +153,11 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
     },
     async (req, reply) => {
       try {
-        const rows = mapCsvToTransactions(req.body.csvText, req.body.mappings, req.body.hasHeader ?? true)
+        const rows = mapCsvToTransactions(
+          req.body.csvText,
+          req.body.mappings,
+          req.body.hasHeader ?? true,
+        )
         return { rows, validCount: validRows(rows).length }
       } catch (err) {
         return reply.status(400).send({ error: `CSV parse error: ${(err as Error).message}` })
@@ -167,17 +187,17 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
           type: 'object',
           required: ['csvText', 'mappings'],
           properties: {
-            csvText:      { type: 'string', maxLength: 5_000_000 },
+            csvText: { type: 'string', maxLength: 5_000_000 },
             instrumentId: { type: 'integer', minimum: 1 },
-            hasHeader:    { type: 'boolean' },
+            hasHeader: { type: 'boolean' },
             mappings: {
               type: 'array',
               items: {
                 type: 'object',
                 required: ['source', 'target'],
                 properties: {
-                  source:    { oneOf: [{ type: 'string' }, { type: 'integer' }] },
-                  target:    { type: 'string' },
+                  source: { oneOf: [{ type: 'string' }, { type: 'integer' }] },
+                  target: { type: 'string' },
                   transform: { type: 'object' },
                 },
               },
@@ -196,7 +216,7 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
         if (!inst) return reply.status(404).send({ error: 'Instrument not found' })
       }
 
-      let rows
+      let rows: MappedRow[]
       try {
         rows = mapCsvToTransactions(csvText, mappings, hasHeader)
       } catch (err) {
@@ -210,7 +230,7 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
 
       // Build a ticker → instrument map for fast lookup
       const allInstruments = app.instruments.list(user.tenantId)
-      const byTicker = new Map(allInstruments.map(i => [i.ticker.toUpperCase(), i]))
+      const byTicker = new Map(allInstruments.map((i) => [i.ticker.toUpperCase(), i]))
 
       let inserted = 0
       const errors: { index: number; error: string }[] = []
@@ -230,7 +250,10 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
         } else if (instrumentId !== undefined) {
           resolvedId = instrumentId
         } else {
-          errors.push({ index: row.index, error: 'No ticker in row and no default instrument specified' })
+          errors.push({
+            index: row.index,
+            error: 'No ticker in row and no default instrument specified',
+          })
           continue
         }
 
@@ -238,10 +261,23 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
           const body = toCreateBody(row, resolvedId)
           const txn = app.transactions.create(user.tenantId, body, user.id)
           await computeAndPersistGbpFields(
-            user.tenantId, txn.id, user.id, body,
-            app.fx, app.transactions, app.instruments,
+            user.tenantId,
+            txn.id,
+            user.id,
+            body,
+            app.fx,
+            app.transactions,
+            app.instruments,
           )
-          linkRealisedProjection(app, user.tenantId, resolvedId, body.txnType, body.txnDate, body.quantity, txn.id)
+          linkRealisedProjection(
+            app,
+            user.tenantId,
+            resolvedId,
+            body.txnType,
+            body.txnDate,
+            body.quantity,
+            txn.id,
+          )
           inserted++
           touchedInstruments.add(resolvedId)
         } catch (err) {
@@ -274,7 +310,7 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
 
       const txns = app.transactions.list(user.tenantId, opts)
       const allInstruments = app.instruments.list(user.tenantId)
-      const instrumentsById = new Map<number, Instrument>(allInstruments.map(i => [i.id, i]))
+      const instrumentsById = new Map<number, Instrument>(allInstruments.map((i) => [i.id, i]))
 
       if (format === 'cgtcalculator') {
         const rows = toCgtCalculatorRows(txns, instrumentsById)
@@ -302,7 +338,7 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
 
       const disposals = app.cgtDisposals.list(user.tenantId, opts)
       const allInstruments = app.instruments.list(user.tenantId)
-      const instrumentsById = new Map<number, Instrument>(allInstruments.map(i => [i.id, i]))
+      const instrumentsById = new Map<number, Instrument>(allInstruments.map((i) => [i.id, i]))
 
       const csv = disposalsToCsv(disposals, instrumentsById)
       reply.header('Content-Type', 'text/csv')
@@ -321,9 +357,9 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
       const taxYear = req.query.taxYear ?? taxYearForDate(new Date().toISOString().slice(0, 10))
       const income = req.query.income ?? '0'
 
-      const configRow = app.db.prepare(
-        'SELECT * FROM tax_year_config WHERE tax_year = ?'
-      ).get(taxYear) as TaxYearConfigRow | undefined
+      const configRow = app.db
+        .prepare('SELECT * FROM tax_year_config WHERE tax_year = ?')
+        .get(taxYear) as TaxYearConfigRow | undefined
       if (!configRow) return reply.status(404).send({ error: `No tax year config for ${taxYear}` })
 
       const config = toTaxYearConfig(configRow)
@@ -331,7 +367,7 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
       const summary = buildCgtSummary(disposals, config, income)
 
       const allInstruments = app.instruments.list(user.tenantId)
-      const instrumentsById = new Map<number, Instrument>(allInstruments.map(i => [i.id, i]))
+      const instrumentsById = new Map<number, Instrument>(allInstruments.map((i) => [i.id, i]))
 
       // Holdings from pool store + price service
       const { default: Big } = await import('big.js')
@@ -347,7 +383,12 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
           if (instrument.currency === 'GBP') {
             priceGbp = price.closePrice
           } else {
-            const fxResult = await app.fx.convert(price.closePrice, instrument.currency, 'GBP', price.priceDate)
+            const fxResult = await app.fx.convert(
+              price.closePrice,
+              instrument.currency,
+              'GBP',
+              price.priceDate,
+            )
             priceGbp = fxResult.gbp
           }
           const value = new Big(pool.quantity).times(priceGbp)
@@ -364,13 +405,15 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
       }
 
       // Dividend rows
-      const dividendTxns = app.transactions.list(user.tenantId, {
-        from: configRow.start_date,
-        to: configRow.end_date,
-      }).filter(t => t.txnType === 'DIV_PAY')
+      const dividendTxns = app.transactions
+        .list(user.tenantId, {
+          from: configRow.start_date,
+          to: configRow.end_date,
+        })
+        .filter((t) => t.txnType === 'DIV_PAY')
 
       const incomeAboveBasicRate = parseFloat(income) > parseFloat(config.incomeBasicRateLimit)
-      const dividends: DividendRow[] = dividendTxns.map(txn => {
+      const dividends: DividendRow[] = dividendTxns.map((txn) => {
         const dtax = computeDividendTax(txn, config, taxYear, incomeAboveBasicRate)
         const instrument = instrumentsById.get(txn.instrumentId)
         return {

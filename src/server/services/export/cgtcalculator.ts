@@ -17,20 +17,25 @@
  *     SPLIT that have no GBP price are silently skipped.
  */
 
-import type { Transaction, Instrument } from '../../../shared/types.ts'
+import type { Instrument, Transaction } from '../../../shared/types.ts'
 
 export interface CgtCalculatorRow {
   action: 'B' | 'S'
-  date: string        // DD/MM/YYYY
+  date: string // DD/MM/YYYY
   company: string
   shares: string
-  price: string       // GBP pounds
-  charges: string     // GBP pounds
-  stampDuty: string   // GBP pounds (0 for non-UK stocks)
+  price: string // GBP pounds
+  charges: string // GBP pounds
+  stampDuty: string // GBP pounds (0 for non-UK stocks)
 }
 
 const ACQUISITION_TYPES = new Set([
-  'BUY', 'RSU_VEST', 'ESPP_PURCHASE', 'TRANSFER_IN', 'RIGHTS_ISSUE', 'DRIP',
+  'BUY',
+  'RSU_VEST',
+  'ESPP_PURCHASE',
+  'TRANSFER_IN',
+  'RIGHTS_ISSUE',
+  'DRIP',
 ])
 const DISPOSAL_TYPES = new Set(['SELL', 'TRANSFER_OUT'])
 
@@ -68,6 +73,6 @@ export function toCgtCalculatorRows(
 
 export function formatCgtCalculator(rows: CgtCalculatorRow[]): string {
   return rows
-    .map(r => [r.action, r.date, r.company, r.shares, r.price, r.charges, r.stampDuty].join('\t'))
+    .map((r) => [r.action, r.date, r.company, r.shares, r.price, r.charges, r.stampDuty].join('\t'))
     .join('\n')
 }

@@ -25,8 +25,8 @@
  */
 
 import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -85,32 +85,36 @@ if (!filePath) {
 const raw = JSON.parse(readFileSync(resolve(filePath), 'utf-8')) as GhostfolioExport
 
 // Build tag-id → tag-name map
-const tagMap = new Map<string, string>(raw.tags.map(t => [t.id, t.name.trim()]))
+const tagMap = new Map<string, string>(raw.tags.map((t) => [t.id, t.name.trim()]))
 
-const dbPath = process.env['DB_PATH'] ?? resolve(__dirname, '../data/taxtracker.db')
+const dbPath = process.env.DB_PATH ?? resolve(__dirname, '../data/taxtracker.db')
 console.log(`Opening database: ${dbPath}`)
 const db = new DatabaseSync(dbPath)
 db.exec('PRAGMA foreign_keys = ON')
 
 const TENANT_ID = 1
-const USER_ID   = 1  // admin user created during setup
+const USER_ID = 1 // admin user created during setup
 
 // Ensure instrument exists, return its id
 function ensureInstrument(symbol: string, currency: string): number {
-  const existing = db.prepare('SELECT id FROM instrument WHERE tenant_id = ? AND ticker = ?').get(TENANT_ID, symbol) as { id: number } | undefined
+  const existing = db
+    .prepare('SELECT id FROM instrument WHERE tenant_id = ? AND ticker = ?')
+    .get(TENANT_ID, symbol) as { id: number } | undefined
   if (existing) return existing.id
 
-  const result = db.prepare(`
+  const result = db
+    .prepare(`
     INSERT INTO instrument (tenant_id, ticker, name, currency, instrument_type, is_employer_stock, rsu_withholding_method)
     VALUES (?, ?, ?, ?, 'equity', 1, 'net-settlement')
-  `).run(TENANT_ID, symbol, symbol, currency)
+  `)
+    .run(TENANT_ID, symbol, symbol, currency)
   console.log(`  Created instrument: ${symbol} (${currency})`)
   return Number(result.lastInsertRowid)
 }
 
 let imported = 0
-let skipped  = 0
-let warnings: string[] = []
+let skipped = 0
+const warnings: string[] = []
 
 const insertTxn = db.prepare(`
   INSERT INTO txn (
@@ -130,7 +134,7 @@ db.exec('BEGIN')
 try {
   for (const activity of raw.activities) {
     // Resolve tag names for this activity
-    const tagNames = activity.tags.map(id => tagMap.get(id) ?? id)
+    const tagNames = activity.tags.map((id) => tagMap.get(id) ?? id)
 
     // Map to txn_type
     let txnType: string
@@ -149,7 +153,9 @@ try {
         txnType = 'BUY'
       }
     } else {
-      console.warn(`  Skipping unsupported type: ${activity.type} (${activity.symbol} ${activity.date})`)
+      console.warn(
+        `  Skipping unsupported type: ${activity.type} (${activity.symbol} ${activity.date})`,
+      )
       skipped++
       continue
     }
@@ -159,12 +165,18 @@ try {
     // Build notes
     const noteParts: string[] = []
     if (lateNightUtc) {
-      noteParts.push(`date-check: original timestamp ${activity.date} is late UTC — may be next day UK`)
-      warnings.push(`${activity.symbol} ${date} (${txnType}): timestamp ${activity.date} — verify date`)
+      noteParts.push(
+        `date-check: original timestamp ${activity.date} is late UTC — may be next day UK`,
+      )
+      warnings.push(
+        `${activity.symbol} ${date} (${txnType}): timestamp ${activity.date} — verify date`,
+      )
     }
     if (activity.fee > 0) {
       noteParts.push(`fee: ${activity.fee} ${activity.currency} — enter GBP equivalent in costsGbp`)
-      warnings.push(`${activity.symbol} ${date} (${txnType}): fee ${activity.fee} ${activity.currency} stored as note, not costsGbp`)
+      warnings.push(
+        `${activity.symbol} ${date} (${txnType}): fee ${activity.fee} ${activity.currency} stored as note, not costsGbp`,
+      )
     }
     if (activity.comment) {
       noteParts.push(`ghostfolio comment: ${activity.comment}`)
@@ -187,7 +199,12 @@ try {
       notes,
     )
     const txnId = Number(result.lastInsertRowid)
-    insertAudit.run(TENANT_ID, USER_ID, txnId, JSON.stringify({ importSource: 'ghostfolio', symbol: activity.symbol, date, txnType }))
+    insertAudit.run(
+      TENANT_ID,
+      USER_ID,
+      txnId,
+      JSON.stringify({ importSource: 'ghostfolio', symbol: activity.symbol, date, txnType }),
+    )
     imported++
   }
 

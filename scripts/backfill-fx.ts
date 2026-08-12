@@ -21,8 +21,8 @@ import { createFxService } from '../src/server/services/fx/index.ts'
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
-const DB_PATH = process.env['DB_PATH'] ?? './data/taxtracker.db'
-const FX_POLICY = (process.env['FX_RATE_POLICY'] ?? 'hmrc-monthly') as 'hmrc-monthly' | 'daily-spot'
+const DB_PATH = process.env.DB_PATH ?? './data/taxtracker.db'
+const FX_POLICY = (process.env.FX_RATE_POLICY ?? 'hmrc-monthly') as 'hmrc-monthly' | 'daily-spot'
 
 // ── Types for raw DB rows ─────────────────────────────────────────────────────
 
@@ -45,14 +45,16 @@ db.exec('PRAGMA foreign_keys = ON')
 const fxStore = createFxRateStore(db)
 const fx = createFxService(fxStore, FX_POLICY)
 
-const rows = db.prepare(`
+const rows = db
+  .prepare(`
   SELECT id, txn_type, txn_date, quantity, unit_price_native, native_currency, costs_gbp
   FROM txn
   WHERE unit_price_gbp IS NULL
     AND unit_price_native IS NOT NULL
     AND native_currency IS NOT NULL
   ORDER BY txn_date, id
-`).all() as TxnRow[]
+`)
+  .all() as unknown as TxnRow[]
 
 if (rows.length === 0) {
   console.log('No rows to backfill — all transactions already have unit_price_gbp.')
@@ -67,7 +69,12 @@ let failed = 0
 
 for (const row of rows) {
   try {
-    const fxResult = await fx.convert(row.unit_price_native, row.native_currency, 'GBP', row.txn_date)
+    const fxResult = await fx.convert(
+      row.unit_price_native,
+      row.native_currency,
+      'GBP',
+      row.txn_date,
+    )
     const unitPriceGbp = fxResult.gbp
     const totalGbp = new Big(row.quantity).times(unitPriceGbp).toFixed(8)
     const costsGbp = new Big(row.costs_gbp ?? '0')

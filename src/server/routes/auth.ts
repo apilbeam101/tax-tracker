@@ -1,10 +1,14 @@
 import type { FastifyPluginAsync } from 'fastify'
-import type { Db } from '../db/database.ts'
-import { hashPassword, verifyPassword, DUMMY_HASH } from '../auth/password.ts'
 import type { SessionUser } from '../auth/middleware.ts'
+import { DUMMY_HASH, hashPassword, verifyPassword } from '../auth/password.ts'
 
-interface LoginBody { username: string; password: string }
-interface SetupBody  { password: string }
+interface LoginBody {
+  username: string
+  password: string
+}
+interface SetupBody {
+  password: string
+}
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
   /**
@@ -12,7 +16,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
    * Returns whether first-run setup is needed and whether user is logged in.
    */
   app.get('/status', async (req) => {
-    const userCount = (app.db.prepare('SELECT COUNT(*) AS n FROM user').get() as {n: number}).n
+    const userCount = (app.db.prepare('SELECT COUNT(*) AS n FROM user').get() as { n: number }).n
     return {
       setupRequired: userCount === 0,
       authenticated: !!req.session.user,
@@ -40,15 +44,15 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (req, reply) => {
-      const existing = (app.db.prepare('SELECT COUNT(*) AS n FROM user').get() as {n: number}).n
+      const existing = (app.db.prepare('SELECT COUNT(*) AS n FROM user').get() as { n: number }).n
       if (existing > 0) {
         return reply.status(409).send({ error: 'Setup already completed' })
       }
 
       const passwordHash = await hashPassword(req.body.password)
-      app.db.prepare(
-        'INSERT INTO user (tenant_id, username, password_hash) VALUES (?, ?, ?)'
-      ).run(1, 'admin', passwordHash)
+      app.db
+        .prepare('INSERT INTO user (tenant_id, username, password_hash) VALUES (?, ?, ?)')
+        .run(1, 'admin', passwordHash)
 
       return reply.status(201).send({ ok: true })
     },
@@ -75,14 +79,16 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     },
     async (req, reply) => {
       const { username, password } = req.body
-      const row = app.db.prepare(
-        'SELECT id, tenant_id, username, password_hash FROM user WHERE username = ?'
-      ).get(username) as { id: number; tenant_id: number; username: string; password_hash: string } | undefined
+      const row = app.db
+        .prepare('SELECT id, tenant_id, username, password_hash FROM user WHERE username = ?')
+        .get(username) as
+        | { id: number; tenant_id: number; username: string; password_hash: string }
+        | undefined
 
       // Always run verifyPassword to prevent username enumeration via timing.
       // When the user doesn't exist, compare against a dummy hash so the
       // argon2id work factor is always paid regardless.
-      const valid = await verifyPassword(row?.password_hash ?? DUMMY_HASH, password) && !!row
+      const valid = (await verifyPassword(row?.password_hash ?? DUMMY_HASH, password)) && !!row
 
       if (!valid || !row) {
         // Generic error — don't reveal whether the username exists
@@ -110,7 +116,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
    * Returns a CSRF token bound to the current session.
    * Clients must send this as the `csrf-token` header on state-mutating requests.
    */
-  app.get('/csrf', async (req, reply) => {
+  app.get('/csrf', async (_req, reply) => {
     return { csrfToken: reply.generateCsrf() }
   })
 

@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createFxService } from './index.ts'
-import type { FxRateStore } from '../../repositories/index.ts'
+import { describe, expect, it, vi } from 'vitest'
 import type { FxRate } from '../../../shared/types.ts'
+import type { FxRateStore } from '../../repositories/index.ts'
+import { createFxService } from './index.ts'
 
 function makeFxRate(overrides: Partial<FxRate> = {}): FxRate {
   return {
@@ -84,23 +84,29 @@ describe('FxService — HMRC monthly: date maps to first of month for cache look
     const cached = makeFxRate({ rateDate: '2025-03-01' })
     const store = makeStore()
     // first call misses; second (after fetch) would hit
-    store.get = vi.fn()
-      .mockReturnValueOnce(undefined)   // initial miss
-      .mockReturnValueOnce(cached)      // after fetch
+    store.get = vi
+      .fn()
+      .mockReturnValueOnce(undefined) // initial miss
+      .mockReturnValueOnce(cached) // after fetch
 
     // We won't actually hit the network — just confirm the store.get call uses 2025-03-01
     // by simulating the hmrc module calling store.get with first-of-month
     const { getHmrcRateForDate } = await import('./hmrc.ts')
     // Patch fetch to avoid real network call
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response('Currency,USD,1.27320\n', { status: 200 })
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('Currency,USD,1.27320\n', { status: 200 }))
     try {
       await getHmrcRateForDate('USD', 'GBP', '2025-03-15', store)
     } catch {
       // May fail parsing — that's ok, we just want to verify the first get() call
     }
-    expect((store.get as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual(['USD', 'GBP', '2025-03-01', 'hmrc-monthly'])
+    expect((store.get as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([
+      'USD',
+      'GBP',
+      '2025-03-01',
+      'hmrc-monthly',
+    ])
     fetchSpy.mockRestore()
   })
 })
@@ -111,11 +117,14 @@ describe('FxService — Frankfurter: carries forward prior business day on weeke
     store.get = vi.fn().mockReturnValue(undefined)
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(JSON.stringify({
-        date: '2025-03-14',   // Friday — Frankfurter rolled back from Saturday 2025-03-15
-        base: 'USD',
-        rates: { GBP: 0.78512 },
-      }), { status: 200 })
+      new Response(
+        JSON.stringify({
+          date: '2025-03-14', // Friday — Frankfurter rolled back from Saturday 2025-03-15
+          base: 'USD',
+          rates: { GBP: 0.78512 },
+        }),
+        { status: 200 },
+      ),
     )
 
     const { getFrankfurterRate } = await import('./frankfurter.ts')

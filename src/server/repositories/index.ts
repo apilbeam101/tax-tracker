@@ -1,7 +1,13 @@
 import type {
-  Instrument, CreateInstrumentBody, UpdateInstrumentBody,
-  Transaction, CreateTransactionBody, UpdateTransactionBody,
-  FxRate, FxRateType, Price,
+  CreateInstrumentBody,
+  CreateTransactionBody,
+  FxRate,
+  FxRateType,
+  Instrument,
+  Price,
+  Transaction,
+  UpdateInstrumentBody,
+  UpdateTransactionBody,
 } from '../../shared/types.ts'
 
 export type { CgtDisposalStore } from './sqlite/CgtDisposalStore.ts'
@@ -12,20 +18,38 @@ export interface InstrumentStore {
   getById(tenantId: number, id: number): Instrument | undefined
   getByTicker(tenantId: number, ticker: string): Instrument | undefined
   create(tenantId: number, body: CreateInstrumentBody, userId: number): Instrument
-  update(tenantId: number, id: number, body: UpdateInstrumentBody, userId: number): Instrument | undefined
+  update(
+    tenantId: number,
+    id: number,
+    body: UpdateInstrumentBody,
+    userId: number,
+  ): Instrument | undefined
   delete(tenantId: number, id: number, userId: number): boolean
 }
 
 export interface TransactionStore {
-  list(tenantId: number, opts?: { instrumentId?: number; from?: string; to?: string }): Transaction[]
+  list(
+    tenantId: number,
+    opts?: { instrumentId?: number; from?: string; to?: string },
+  ): Transaction[]
   getById(tenantId: number, id: number): Transaction | undefined
   create(tenantId: number, body: CreateTransactionBody, userId: number): Transaction
-  update(tenantId: number, id: number, body: UpdateTransactionBody, userId: number): Transaction | undefined
+  update(
+    tenantId: number,
+    id: number,
+    body: UpdateTransactionBody,
+    userId: number,
+  ): Transaction | undefined
   delete(tenantId: number, id: number, userId: number): boolean
 }
 
 export interface FxRateStore {
-  get(fromCurrency: string, toCurrency: string, rateDate: string, rateType: FxRateType): FxRate | undefined
+  get(
+    fromCurrency: string,
+    toCurrency: string,
+    rateDate: string,
+    rateType: FxRateType,
+  ): FxRate | undefined
   upsert(rate: Omit<FxRate, 'id' | 'fetchedAt'>): FxRate
   listForMonth(fromCurrency: string, toCurrency: string, year: number, month: number): FxRate[]
 }

@@ -42,10 +42,10 @@ export type MappableField =
   | 'notes'
 
 export type ValueTransform =
-  | { kind: 'static'; value: string }          // always use this value, ignore source column
-  | { kind: 'map'; values: Record<string, string> }  // remap raw → internal value
-  | { kind: 'negate' }                         // multiply by -1 (e.g. for cost columns stored as positive)
-  | { kind: 'dateReformat'; fromFormat: string }  // reformat date to YYYY-MM-DD
+  | { kind: 'static'; value: string } // always use this value, ignore source column
+  | { kind: 'map'; values: Record<string, string> } // remap raw → internal value
+  | { kind: 'negate' } // multiply by -1 (e.g. for cost columns stored as positive)
+  | { kind: 'dateReformat'; fromFormat: string } // reformat date to YYYY-MM-DD
 
 /** One parsed row returned to the caller for preview. */
 export interface MappedRow {
@@ -64,8 +64,18 @@ export interface MappedRow {
 }
 
 const VALID_TXN_TYPES = new Set<string>([
-  'BUY', 'SELL', 'DIV_PAY', 'DRIP', 'RSU_VEST', 'ESPP_PURCHASE',
-  'SPLIT', 'UNSPLIT', 'CAPRETURN', 'RIGHTS_ISSUE', 'TRANSFER_IN', 'TRANSFER_OUT',
+  'BUY',
+  'SELL',
+  'DIV_PAY',
+  'DRIP',
+  'RSU_VEST',
+  'ESPP_PURCHASE',
+  'SPLIT',
+  'UNSPLIT',
+  'CAPRETURN',
+  'RIGHTS_ISSUE',
+  'TRANSFER_IN',
+  'TRANSFER_OUT',
 ])
 
 const DECIMAL_RE = /^\d+(\.\d+)?$/
@@ -82,7 +92,7 @@ function applyTransform(raw: string, transform: ValueTransform | undefined): str
     }
     case 'negate': {
       const n = parseFloat(raw)
-      if (!isNaN(n)) return String(-n)
+      if (!Number.isNaN(n)) return String(-n)
       return raw
     }
     case 'dateReformat': {
@@ -102,7 +112,9 @@ function reformatDate(raw: string, fromFormat: string): string {
   const parts = raw.split(sep)
   const fmtParts = fmt.split(sep)
 
-  let year = '', month = '', day = ''
+  let year = '',
+    month = '',
+    day = ''
   for (let i = 0; i < fmtParts.length; i++) {
     const p = fmtParts[i]?.replace(/[^YMD]/g, '')
     if (p === 'YYYY' || p === 'YY') year = parts[i] ?? ''
@@ -110,7 +122,7 @@ function reformatDate(raw: string, fromFormat: string): string {
     else if (p === 'DD' || p === 'D') day = (parts[i] ?? '').padStart(2, '0')
   }
 
-  if (year.length === 2) year = '20' + year
+  if (year.length === 2) year = `20${year}`
   return `${year}-${month}-${day}`
 }
 
@@ -193,11 +205,14 @@ export function mapCsvToTransactions(
 
 /** Filter mapped rows to only those that are valid and ready to import. */
 export function validRows(rows: MappedRow[]): MappedRow[] {
-  return rows.filter(r => r.errors.length === 0)
+  return rows.filter((r) => r.errors.length === 0)
 }
 
 /** Build a CreateTransactionBody-compatible object from a valid MappedRow. */
-export function toCreateBody(row: MappedRow, instrumentId: number): {
+export function toCreateBody(
+  row: MappedRow,
+  instrumentId: number,
+): {
   instrumentId: number
   txnType: TransactionType
   txnDate: string

@@ -1,12 +1,9 @@
 import Fastify from 'fastify'
-import { config } from './config/env.ts'
 import { buildApp } from './app.ts'
+import { config } from './config/env.ts'
+import { loggerOptions } from './config/logging.ts'
 
-const server = Fastify({
-  logger: config.isProduction
-    ? { level: 'warn' }
-    : { level: 'info', transport: { target: 'pino-pretty' } },
-})
+const server = Fastify({ logger: loggerOptions(config.isProduction) })
 
 try {
   await buildApp(server)

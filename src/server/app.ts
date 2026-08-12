@@ -1,26 +1,27 @@
-import type { FastifyInstance } from 'fastify'
-import fastifyHelmet from '@fastify/helmet'
+import { join } from 'node:path'
 import fastifyCookie from '@fastify/cookie'
-import fastifySession from '@fastify/session'
 import fastifyCsrfProtection from '@fastify/csrf-protection'
+import fastifyHelmet from '@fastify/helmet'
 import fastifyRateLimit from '@fastify/rate-limit'
+import fastifySession from '@fastify/session'
 import fastifyStatic from '@fastify/static'
-import { join } from 'path'
+import type { FastifyInstance } from 'fastify'
 import { config } from './config/env.ts'
 import { initDb } from './db/database.ts'
-import { healthRoute } from './routes/health.ts'
-import { authRoutes } from './routes/auth.ts'
-import { apiRoutes } from './routes/api.ts'
-import { createInstrumentStore } from './repositories/sqlite/InstrumentStore.ts'
-import { createTransactionStore } from './repositories/sqlite/TransactionStore.ts'
-import { createFxRateStore } from './repositories/sqlite/FxRateStore.ts'
+import { errorHandler } from './errors.ts'
 import { createCgtDisposalStore } from './repositories/sqlite/CgtDisposalStore.ts'
-import { createS104PoolStore } from './repositories/sqlite/S104PoolStore.ts'
-import { createFxService } from './services/fx/index.ts'
+import { createFxRateStore } from './repositories/sqlite/FxRateStore.ts'
+import { createInstrumentStore } from './repositories/sqlite/InstrumentStore.ts'
 import { createPriceStore } from './repositories/sqlite/PriceStore.ts'
+import { createS104PoolStore } from './repositories/sqlite/S104PoolStore.ts'
+import { createTransactionStore } from './repositories/sqlite/TransactionStore.ts'
+import { apiRoutes } from './routes/api.ts'
+import { authRoutes } from './routes/auth.ts'
+import { healthRoute } from './routes/health.ts'
+import { createFxService } from './services/fx/index.ts'
+import { createPriceService } from './services/prices/cache.ts'
 import { createTiingoProvider } from './services/prices/tiingo.ts'
 import { createYahooProvider } from './services/prices/yahoo.ts'
-import { createPriceService } from './services/prices/cache.ts'
 
 // Resolve client dist relative to the project root (process.cwd()), not the
 // source file location — avoids __dirname/import.meta.url resolution issues
@@ -28,6 +29,8 @@ import { createPriceService } from './services/prices/cache.ts'
 const CLIENT_DIST = join(process.cwd(), 'dist', 'client')
 
 export async function buildApp(app: FastifyInstance): Promise<void> {
+  app.setErrorHandler(errorHandler)
+
   // ── Security headers ────────────────────────────────────────────────────────
   await app.register(fastifyHelmet, {
     contentSecurityPolicy: {

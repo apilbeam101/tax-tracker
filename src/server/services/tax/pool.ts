@@ -1,8 +1,9 @@
 import Big from 'big.js'
+import { BadRequestError } from '../../errors.ts'
 
 export interface S104PoolState {
-  quantity: string  // exact decimal
-  costGbp: string   // total allowable cost in the pool, exact decimal
+  quantity: string // exact decimal
+  costGbp: string // total allowable cost in the pool, exact decimal
 }
 
 export function emptyPool(): S104PoolState {
@@ -42,9 +43,7 @@ export function disposeFromPool(
   const dispQty = new Big(quantity)
 
   if (dispQty.gt(poolQty)) {
-    throw new Error(
-      `Cannot dispose ${quantity} shares; pool only holds ${pool.quantity}`
-    )
+    throw new BadRequestError(`Cannot dispose ${quantity} shares; pool only holds ${pool.quantity}`)
   }
 
   if (dispQty.eq(0)) {
@@ -55,9 +54,7 @@ export function disposeFromPool(
   const allowableCost = avgCost.times(dispQty).toFixed(8)
 
   const newQty = poolQty.minus(dispQty)
-  const newCost = newQty.eq(0)
-    ? '0'
-    : new Big(pool.costGbp).minus(allowableCost).toFixed(8)
+  const newCost = newQty.eq(0) ? '0' : new Big(pool.costGbp).minus(allowableCost).toFixed(8)
 
   return {
     allowableCost,
@@ -70,8 +67,8 @@ export function disposeFromPool(
  * splitRatio is "new/old", e.g. "2/1" for a 2-for-1 split.
  */
 export function applyStockSplit(pool: S104PoolState, splitRatio: string): S104PoolState {
-  const [num, den] = splitRatio.split('/').map(s => s.trim())
-  if (!num || !den) throw new Error(`Invalid splitRatio: ${splitRatio}`)
+  const [num, den] = splitRatio.split('/').map((s) => s.trim())
+  if (!num || !den) throw new BadRequestError(`Invalid splitRatio: ${splitRatio}`)
   const newQty = new Big(pool.quantity).times(num).div(den).toFixed(8)
   return { quantity: newQty, costGbp: pool.costGbp }
 }
@@ -81,10 +78,7 @@ export function applyStockSplit(pool: S104PoolState, splitRatio: string): S104Po
  * Reduces the pool cost basis by the aggregate amount returned.
  * If the reduction would push cost below zero, cost is clamped to '0'.
  */
-export function applyCapReturn(
-  pool: S104PoolState,
-  amountPerShareGbp: string,
-): S104PoolState {
+export function applyCapReturn(pool: S104PoolState, amountPerShareGbp: string): S104PoolState {
   const reduction = new Big(pool.quantity).times(amountPerShareGbp)
   const reduced = new Big(pool.costGbp).minus(reduction)
   const newCost = (reduced.lt(0) ? new Big(0) : reduced).toFixed(8)

@@ -1,8 +1,8 @@
 import Big from 'big.js'
 import type { Instrument } from '../../../shared/types.ts'
 import type { S104PoolStore } from '../../repositories/sqlite/S104PoolStore.ts'
-import type { PriceService } from '../prices/cache.ts'
 import type { FxService } from '../fx/index.ts'
+import type { PriceService } from '../prices/cache.ts'
 
 export interface HoldingValuation {
   instrument: Instrument
@@ -49,7 +49,8 @@ export async function computeHoldings(
     // Get the latest cached price; if missing or zero, attempt to fetch today's price
     let priceRecord = priceService.getLatestCached(inst.id)
     if (!priceRecord || parseFloat(priceRecord.closePrice) <= 0) {
-      priceRecord = await priceService.getPrice(inst.id, inst.ticker, inst.currency, today) ?? undefined
+      priceRecord =
+        (await priceService.getPrice(inst.id, inst.ticker, inst.currency, today)) ?? undefined
     }
 
     let latestPriceNative: string | null = null
@@ -64,15 +65,18 @@ export async function computeHoldings(
       latestPriceDate = priceRecord.priceDate
 
       try {
-        const { gbp: priceGbp } = await fx.convert(priceRecord.closePrice, inst.currency, 'GBP', priceRecord.priceDate)
+        const { gbp: priceGbp } = await fx.convert(
+          priceRecord.closePrice,
+          inst.currency,
+          'GBP',
+          priceRecord.priceDate,
+        )
         latestPriceGbp = priceGbp
         const value = qty.times(new Big(priceGbp))
         currentValueGbp = value.toFixed(2)
         const gain = value.minus(cost)
         unrealisedGainGbp = gain.toFixed(2)
-        unrealisedGainPct = cost.gt(0)
-          ? gain.div(cost).times(100).toFixed(2)
-          : null
+        unrealisedGainPct = cost.gt(0) ? gain.div(cost).times(100).toFixed(2) : null
       } catch {
         // FX conversion failed — leave value fields null
       }

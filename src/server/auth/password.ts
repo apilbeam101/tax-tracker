@@ -2,12 +2,12 @@
  * Password hashing using argon2id via @node-rs/argon2 (prebuilt binaries — no compilation).
  * Parameters follow OWASP recommendations for argon2id (2024).
  */
-import { hash, verify, Algorithm } from '@node-rs/argon2'
+import { Algorithm, hash, verify } from '@node-rs/argon2'
 
 const ARGON2_OPTIONS = {
   algorithm: Algorithm.Argon2id,
-  memoryCost: 65536,   // 64 MiB
-  timeCost: 3,         // iterations
+  memoryCost: 65536, // 64 MiB
+  timeCost: 3, // iterations
   parallelism: 4,
 } as const
 

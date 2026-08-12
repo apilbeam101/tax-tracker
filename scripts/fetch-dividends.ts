@@ -25,8 +25,8 @@
  * Requires ALPHA_VANTAGE_API_KEY in .env.
  */
 
+import { dirname, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -34,7 +34,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2)
-const ticker = args.find(a => !a.startsWith('--'))
+const ticker = args.find((a) => !a.startsWith('--'))
 if (!ticker) {
   console.error('Usage: fetch-dividends.ts <TICKER> [--commit] [--from YYYY-MM-DD]')
   process.exit(1)
@@ -43,7 +43,7 @@ const commit = args.includes('--commit')
 const fromIdx = args.indexOf('--from')
 const fromDate: string | null = fromIdx !== -1 ? (args[fromIdx + 1] ?? null) : null
 
-const apiKey = process.env['ALPHA_VANTAGE_API_KEY']
+const apiKey = process.env.ALPHA_VANTAGE_API_KEY
 if (!apiKey) {
   console.error('ALPHA_VANTAGE_API_KEY is not set in .env')
   process.exit(1)
@@ -51,7 +51,7 @@ if (!apiKey) {
 
 // ── DB setup ──────────────────────────────────────────────────────────────────
 
-const DB_PATH = process.env['DB_PATH'] ?? resolve(__dirname, '../data/taxtracker.db')
+const DB_PATH = process.env.DB_PATH ?? resolve(__dirname, '../data/taxtracker.db')
 const db = new DatabaseSync(DB_PATH)
 db.exec('PRAGMA foreign_keys = ON')
 
@@ -60,10 +60,14 @@ const USER_ID = 1
 
 // ── Find instrument ───────────────────────────────────────────────────────────
 
-interface InstrumentRow { id: number; ticker: string; currency: string }
-const instrument = db.prepare(
-  'SELECT id, ticker, currency FROM instrument WHERE tenant_id = ? AND ticker = ?'
-).get(TENANT_ID, ticker) as InstrumentRow | undefined
+interface InstrumentRow {
+  id: number
+  ticker: string
+  currency: string
+}
+const instrument = db
+  .prepare('SELECT id, ticker, currency FROM instrument WHERE tenant_id = ? AND ticker = ?')
+  .get(TENANT_ID, ticker) as InstrumentRow | undefined
 
 if (!instrument) {
   console.error(`Instrument "${ticker}" not found in database. Import it first.`)
@@ -95,7 +99,7 @@ if (!resp.ok) {
   console.error(`Alpha Vantage request failed: HTTP ${resp.status}`)
   process.exit(1)
 }
-const payload = await resp.json() as AlphaVantageResponse
+const payload = (await resp.json()) as AlphaVantageResponse
 
 if (payload.Information) {
   console.error(`Alpha Vantage error: ${payload.Information}`)
@@ -119,18 +123,27 @@ interface TxnRow {
   split_ratio: string | null
 }
 
-const existingTxns = db.prepare(`
+const existingTxns = db
+  .prepare(`
   SELECT id, txn_type, txn_date, quantity, split_ratio
   FROM txn
   WHERE tenant_id = ? AND instrument_id = ?
   ORDER BY txn_date, id
-`).all(TENANT_ID, instrument.id) as TxnRow[]
+`)
+  .all(TENANT_ID, instrument.id) as unknown as TxnRow[]
 
 // ── Compute pool quantity at a given date (ex-date) ───────────────────────────
 // We walk all acquisitions and disposals strictly before the ex-date,
 // applying splits, to know how many shares qualified for the dividend.
 
-const ACQUISITION_TYPES = new Set(['BUY', 'RSU_VEST', 'ESPP_PURCHASE', 'TRANSFER_IN', 'RIGHTS_ISSUE', 'DRIP'])
+const ACQUISITION_TYPES = new Set([
+  'BUY',
+  'RSU_VEST',
+  'ESPP_PURCHASE',
+  'TRANSFER_IN',
+  'RIGHTS_ISSUE',
+  'DRIP',
+])
 const DISPOSAL_TYPES = new Set(['SELL', 'TRANSFER_OUT'])
 
 function poolQuantityAt(beforeDate: string): string {
@@ -143,7 +156,7 @@ function poolQuantityAt(beforeDate: string): string {
       qty -= parseFloat(t.quantity)
     } else if (t.txn_type === 'SPLIT' && t.split_ratio) {
       const [num, den] = t.split_ratio.split('/').map(Number)
-      if (num && den) qty = qty * num / den
+      if (num && den) qty = (qty * num) / den
     }
   }
   return qty > 0 ? qty.toFixed(6).replace(/\.?0+$/, '') || '0' : '0'
@@ -151,16 +164,20 @@ function poolQuantityAt(beforeDate: string): string {
 
 // ── Dedup: existing DIV_PAY dates for this instrument ────────────────────────
 
-const existingDivDates: string[] = (db.prepare(`
+const existingDivDates: string[] = (
+  db
+    .prepare(`
   SELECT txn_date FROM txn
   WHERE tenant_id = ? AND instrument_id = ? AND txn_type = 'DIV_PAY'
   ORDER BY txn_date
-`).all(TENANT_ID, instrument.id) as { txn_date: string }[]).map(r => r.txn_date)
+`)
+    .all(TENANT_ID, instrument.id) as { txn_date: string }[]
+).map((r) => r.txn_date)
 
 function isAlreadyPresent(date: string): boolean {
   for (const existing of existingDivDates) {
     const diffDays = Math.abs(
-      (new Date(date).getTime() - new Date(existing).getTime()) / 86_400_000
+      (new Date(date).getTime() - new Date(existing).getTime()) / 86_400_000,
     )
     if (diffDays <= 3) return true
   }
@@ -220,8 +237,8 @@ for (const record of payload.data) {
 
 // ── Print preview ─────────────────────────────────────────────────────────────
 
-const toInsert = proposed.filter(r => r.skipReason === null)
-const toSkip = proposed.filter(r => r.skipReason !== null)
+const toInsert = proposed.filter((r) => r.skipReason === null)
+const toSkip = proposed.filter((r) => r.skipReason !== null)
 
 console.log(`\n${'─'.repeat(80)}`)
 console.log(`Proposed DIV_PAY rows (${toInsert.length} to insert, ${toSkip.length} skipped):`)
@@ -232,7 +249,7 @@ if (toInsert.length > 0) {
   for (const r of toInsert) {
     const note = r.paymentDateIsFallback ? '⚠ payment date estimated (ex+30d)' : ''
     console.log(
-      `  ${r.exDate}  ${r.paymentDate}  ${r.amountPerShare.padStart(12)}  ${r.quantity.padStart(11)}  ${note}`
+      `  ${r.exDate}  ${r.paymentDate}  ${r.amountPerShare.padStart(12)}  ${r.quantity.padStart(11)}  ${note}`,
     )
   }
 }
@@ -278,7 +295,9 @@ try {
       `ex_dividend_date: ${r.exDate}`,
       r.paymentDateIsFallback ? `payment_date estimated (no Alpha Vantage data): ex+30d` : null,
       `source: alpha-vantage`,
-    ].filter(Boolean).join(' | ')
+    ]
+      .filter(Boolean)
+      .join(' | ')
 
     const result = insertTxn.run(
       TENANT_ID,
@@ -294,7 +313,12 @@ try {
       TENANT_ID,
       USER_ID,
       txnId,
-      JSON.stringify({ importSource: 'alpha-vantage', ticker, exDate: r.exDate, paymentDate: r.paymentDate }),
+      JSON.stringify({
+        importSource: 'alpha-vantage',
+        ticker,
+        exDate: r.exDate,
+        paymentDate: r.paymentDate,
+      }),
     )
     inserted++
   }

@@ -13,8 +13,8 @@
 
 import PDFDocument from 'pdfkit'
 import type { Instrument } from '../../../shared/types.ts'
-import type { CgtDisposalRecord } from '../tax/matching.ts'
 import type { CgtSummary } from '../tax/cgt_summary.ts'
+import type { CgtDisposalRecord } from '../tax/matching.ts'
 
 export interface HoldingRow {
   ticker: string
@@ -36,7 +36,7 @@ export interface DividendRow {
 function fmt(v: string | null | undefined, decimals = 2): string {
   if (v == null) return '—'
   const n = parseFloat(v)
-  if (isNaN(n)) return v
+  if (Number.isNaN(n)) return v
   return `£${n.toLocaleString('en-GB', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`
 }
 
@@ -46,7 +46,6 @@ function fmtNum(v: string | null | undefined): string {
 }
 
 const MARGIN = 50
-const LINE = 16
 const COL_GAP = 10
 
 function tableRow(
@@ -84,7 +83,7 @@ export async function generateAnnualReportPdf(opts: {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: MARGIN, size: 'A4' })
     const chunks: Buffer[] = []
-    doc.on('data', chunk => chunks.push(chunk))
+    doc.on('data', (chunk) => chunks.push(chunk))
     doc.on('end', () => resolve(Buffer.concat(chunks)))
     doc.on('error', reject)
 
@@ -99,17 +98,20 @@ export async function generateAnnualReportPdf(opts: {
     // Summary box
     doc.font('Helvetica-Bold').fontSize(10)
     const summaryItems = [
-      ['Total proceeds',           fmt(summary.totalProceeds)],
-      ['Allowable costs',          fmt(summary.totalAllowableCost)],
-      ['Gross gain',               fmt(summary.grossGain)],
-      ['Gross loss',               fmt(summary.grossLoss)],
-      ['Net gain / (loss)',        fmt(summary.netGain)],
-      ['Annual exempt amount',     fmt(summary.annualExempt)],
-      ['Taxable gain',             fmt(summary.taxableGain)],
-      ['Estimated CGT liability',  fmt(summary.estimatedTax)],
+      ['Total proceeds', fmt(summary.totalProceeds)],
+      ['Allowable costs', fmt(summary.totalAllowableCost)],
+      ['Gross gain', fmt(summary.grossGain)],
+      ['Gross loss', fmt(summary.grossLoss)],
+      ['Net gain / (loss)', fmt(summary.netGain)],
+      ['Annual exempt amount', fmt(summary.annualExempt)],
+      ['Taxable gain', fmt(summary.taxableGain)],
+      ['Estimated CGT liability', fmt(summary.estimatedTax)],
     ]
     for (const [label, value] of summaryItems) {
-      doc.font('Helvetica-Bold').fontSize(10).text(label + ':', MARGIN, doc.y, { continued: true, width: 200 })
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(10)
+        .text(`${label}:`, MARGIN, doc.y, { continued: true, width: 200 })
       doc.font('Helvetica').text(value ?? '')
     }
 
@@ -118,18 +120,23 @@ export async function generateAnnualReportPdf(opts: {
     sectionTitle(doc, '1. Current Holdings')
 
     const hWidths = [60, 70, 90, 90, 100]
-    tableRow(doc, doc.y, ['Ticker', 'Shares', 'Cost (£)', 'Value (£)', 'Unrealised G/L (£)'], hWidths, true)
+    tableRow(
+      doc,
+      doc.y,
+      ['Ticker', 'Shares', 'Cost (£)', 'Value (£)', 'Unrealised G/L (£)'],
+      hWidths,
+      true,
+    )
     doc.moveDown(0.3)
 
     for (const h of holdings) {
       if (doc.y > 740) doc.addPage()
-      tableRow(doc, doc.y, [
-        h.ticker,
-        fmtNum(h.quantity),
-        fmt(h.costGbp),
-        fmt(h.valueGbp),
-        fmt(h.unrealisedGainGbp),
-      ], hWidths)
+      tableRow(
+        doc,
+        doc.y,
+        [h.ticker, fmtNum(h.quantity), fmt(h.costGbp), fmt(h.valueGbp), fmt(h.unrealisedGainGbp)],
+        hWidths,
+      )
       doc.moveDown(0.25)
     }
 
@@ -138,21 +145,32 @@ export async function generateAnnualReportPdf(opts: {
     sectionTitle(doc, '2. Realised Disposals')
 
     const dWidths = [55, 75, 55, 65, 85, 85, 70]
-    tableRow(doc, doc.y, ['Date', 'Ticker', 'Match', 'Shares', 'Proceeds (£)', 'Cost (£)', 'Gain (£)'], dWidths, true)
+    tableRow(
+      doc,
+      doc.y,
+      ['Date', 'Ticker', 'Match', 'Shares', 'Proceeds (£)', 'Cost (£)', 'Gain (£)'],
+      dWidths,
+      true,
+    )
     doc.moveDown(0.3)
 
     for (const d of disposals) {
       if (doc.y > 740) doc.addPage()
       const instrument = instrumentsById.get(d.instrumentId)
-      tableRow(doc, doc.y, [
-        d.disposalDate,
-        instrument?.ticker ?? '',
-        d.matchType,
-        fmtNum(d.quantity),
-        fmt(d.proceedsGbp),
-        fmt(d.allowableCostGbp),
-        fmt(d.gainGbp),
-      ], dWidths)
+      tableRow(
+        doc,
+        doc.y,
+        [
+          d.disposalDate,
+          instrument?.ticker ?? '',
+          d.matchType,
+          fmtNum(d.quantity),
+          fmt(d.proceedsGbp),
+          fmt(d.allowableCostGbp),
+          fmt(d.gainGbp),
+        ],
+        dWidths,
+      )
       doc.moveDown(0.25)
     }
 
@@ -162,38 +180,63 @@ export async function generateAnnualReportPdf(opts: {
       sectionTitle(doc, '3. Dividend Income')
 
       const divWidths = [65, 60, 80, 90, 80, 70]
-      tableRow(doc, doc.y, ['Date', 'Ticker', 'Gross (£)', 'Withholding (£)', 'Net (£)', 'FTCR (£)'], divWidths, true)
+      tableRow(
+        doc,
+        doc.y,
+        ['Date', 'Ticker', 'Gross (£)', 'Withholding (£)', 'Net (£)', 'FTCR (£)'],
+        divWidths,
+        true,
+      )
       doc.moveDown(0.3)
 
       for (const div of dividends) {
         if (doc.y > 740) doc.addPage()
-        tableRow(doc, doc.y, [
-          div.txnDate, div.ticker,
-          fmt(div.grossGbp), fmt(div.withholdingGbp),
-          fmt(div.netGbp), fmt(div.ftcrGbp),
-        ], divWidths)
+        tableRow(
+          doc,
+          doc.y,
+          [
+            div.txnDate,
+            div.ticker,
+            fmt(div.grossGbp),
+            fmt(div.withholdingGbp),
+            fmt(div.netGbp),
+            fmt(div.ftcrGbp),
+          ],
+          divWidths,
+        )
         doc.moveDown(0.25)
       }
     }
 
     // ── Liability breakdown ──────────────────────────────────────────────────
     doc.addPage()
-    sectionTitle(doc, dividends.length > 0 ? '4. Estimated CGT Liability' : '3. Estimated CGT Liability')
+    sectionTitle(
+      doc,
+      dividends.length > 0 ? '4. Estimated CGT Liability' : '3. Estimated CGT Liability',
+    )
 
     const liabilityItems = [
-      ['Taxable gain after AEA',    fmt(summary.taxableGain)],
-      ['Basic rate estimate',        fmt(summary.taxAtBasicRate)],
-      ['Higher rate estimate',       fmt(summary.taxAtHigherRate)],
-      ['Best estimate liability',    fmt(summary.estimatedTax)],
-      ['Must report to HMRC',        summary.mustReport ? 'Yes' : 'No'],
+      ['Taxable gain after AEA', fmt(summary.taxableGain)],
+      ['Basic rate estimate', fmt(summary.taxAtBasicRate)],
+      ['Higher rate estimate', fmt(summary.taxAtHigherRate)],
+      ['Best estimate liability', fmt(summary.estimatedTax)],
+      ['Must report to HMRC', summary.mustReport ? 'Yes' : 'No'],
     ]
     for (const [label, value] of liabilityItems) {
-      doc.font('Helvetica-Bold').fontSize(10).text(label + ':', MARGIN, doc.y, { continued: true, width: 220 })
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(10)
+        .text(`${label}:`, MARGIN, doc.y, { continued: true, width: 220 })
       doc.font('Helvetica').text(value ?? '')
     }
 
-    doc.font('Helvetica').fontSize(8).moveDown(2)
-      .text('This report is generated for informational purposes only and does not constitute tax advice. Verify all figures with a qualified tax adviser before filing.')
+    doc
+      .font('Helvetica')
+      .fontSize(8)
+      .moveDown(2)
+      .text(
+        'This report is generated for informational purposes only and does not constitute tax advice. Verify all figures with a qualified tax adviser before filing.',
+      )
 
     doc.end()
   })

@@ -15,9 +15,19 @@ const SCHEDULE_TYPE_BY_TXN_TYPE: Record<string, string> = {
  * engine" on the Tax Summary page remains available to surface and fix real
  * matching errors on demand.
  */
-export function recalcInstrument(app: FastifyInstance, tenantId: number, instrumentId: number): void {
+export function recalcInstrument(
+  app: FastifyInstance,
+  tenantId: number,
+  instrumentId: number,
+): void {
   try {
-    runTaxEngineForInstrument(tenantId, instrumentId, app.transactions, app.cgtDisposals, app.s104Pools)
+    runTaxEngineForInstrument(
+      tenantId,
+      instrumentId,
+      app.transactions,
+      app.cgtDisposals,
+      app.s104Pools,
+    )
   } catch (err) {
     app.log.warn(
       { err, tenantId, instrumentId },
@@ -46,7 +56,8 @@ export function linkRealisedProjection(
   const scheduleType = SCHEDULE_TYPE_BY_TXN_TYPE[txnType]
   if (!scheduleType) return
 
-  app.db.prepare(`
+  app.db
+    .prepare(`
     UPDATE vest_schedule SET realised_txn_id = ?
     WHERE id = (
       SELECT id FROM vest_schedule
@@ -55,12 +66,19 @@ export function linkRealisedProjection(
       ORDER BY ABS(CAST(quantity AS REAL) - CAST(? AS REAL)) ASC, id ASC
       LIMIT 1
     )
-  `).run(txnId, tenantId, instrumentId, scheduleType, txnDate, quantity)
+  `)
+    .run(txnId, tenantId, instrumentId, scheduleType, txnDate, quantity)
 }
 
 /** Unlink any Projections entry currently marked as realised by this transaction. */
-export function unlinkRealisedProjection(app: FastifyInstance, tenantId: number, txnId: number): void {
-  app.db.prepare(
-    'UPDATE vest_schedule SET realised_txn_id = NULL WHERE tenant_id = ? AND realised_txn_id = ?',
-  ).run(tenantId, txnId)
+export function unlinkRealisedProjection(
+  app: FastifyInstance,
+  tenantId: number,
+  txnId: number,
+): void {
+  app.db
+    .prepare(
+      'UPDATE vest_schedule SET realised_txn_id = NULL WHERE tenant_id = ? AND realised_txn_id = ?',
+    )
+    .run(tenantId, txnId)
 }

@@ -1,0 +1,7 @@
+title = "claude-tax gitleaks config"
+
+# A custom config file REPLACES gitleaks' default ruleset unless it
+# explicitly extends it -- an [extend]-less config would silently report
+# "no leaks found" on every scan regardless of what's in the tree.
+[extend]
+useDefault = true

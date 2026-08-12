@@ -3,8 +3,8 @@
 export type TransactionType =
   | 'BUY'
   | 'SELL'
-  | 'DIV_PAY'         // cash dividend payment (taxable income)
-  | 'DRIP'            // dividend reinvestment — shares acquired at market price
+  | 'DIV_PAY' // cash dividend payment (taxable income)
+  | 'DRIP' // dividend reinvestment — shares acquired at market price
   | 'RSU_VEST'
   | 'ESPP_PURCHASE'
   | 'SPLIT'

@@ -1,12 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { requireAuth } from '../auth/middleware.ts'
-import { instrumentRoutes } from './instruments.ts'
-import { transactionRoutes } from './transactions.ts'
-import { taxRoutes } from './tax.ts'
-import { holdingRoutes } from './holdings.ts'
 import { chartRoutes } from './charts.ts'
-import { projectionRoutes } from './projections.ts'
+import { holdingRoutes } from './holdings.ts'
 import { importExportRoutes } from './import-export.ts'
+import { instrumentRoutes } from './instruments.ts'
+import { projectionRoutes } from './projections.ts'
+import { taxRoutes } from './tax.ts'
+import { transactionRoutes } from './transactions.ts'
 
 /**
  * Parent plugin for all authenticated API routes.

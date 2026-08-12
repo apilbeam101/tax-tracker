@@ -67,9 +67,7 @@ export function rsuPoolEntry(txn: Transaction): { quantity: string; costGbp: str
   // For sell-to-cover and cash the gross shares enter the pool.
   // For net-settlement only the net delivered shares (txn.quantity) enter.
   const quantity =
-    method === 'net-settlement'
-      ? txn.quantity
-      : (txn.rsuGrossSharesVested ?? txn.quantity)
+    method === 'net-settlement' ? txn.quantity : (txn.rsuGrossSharesVested ?? txn.quantity)
 
   const costGbp = new Big(quantity).times(vestPriceGbp).toFixed(8)
   return { quantity, costGbp }

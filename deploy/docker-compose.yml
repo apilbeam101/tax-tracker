@@ -1,0 +1,43 @@
+# Before first run:
+#   1. cp ../.env.example ../.env  and fill in REAL secrets (not the CHANGE_ME
+#      placeholders -- buildConfig() only checks presence, not entropy).
+#   2. mkdir -p ../data && sudo chown -R 10001:10001 ../data
+#      The image's own /app/data (owned by uid 10001, see Dockerfile) is
+#      shadowed entirely by this bind mount -- Docker does NOT re-apply the
+#      image's ownership to an existing host directory, only to a brand-new
+#      named volume. Skip this and the container crash-loops on SQLITE_CANTOPEN.
+services:
+  tax-tracker:
+    build:
+      context: ..
+    restart: unless-stopped
+    init: true # tini as PID 1 -- plain `node` as PID 1 ignores SIGTERM outright
+    env_file:
+      - ../.env
+    environment:
+      # .env's HOST=127.0.0.1 default means "loopback inside THIS container's
+      # network namespace" -- not the host's. Without this override the app
+      # is unreachable through the port mapping below even though the
+      # container's own healthcheck (which also probes 127.0.0.1) stays green.
+      HOST: 0.0.0.0
+      # Matches the app's own default (./data/taxtracker.db resolved against
+      # WORKDIR /app) -- kept explicit so it can't silently drift from the
+      # volume mount below if WORKDIR or the default ever changes.
+      DB_PATH: /app/data/taxtracker.db
+    ports:
+      # Loopback-only, matching README.md's reverse-proxy guidance -- publishing
+      # to 0.0.0.0 here would put the app on the public internet over plain
+      # HTTP the instant this file runs on any host without a host firewall.
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ../data:/app/data
+    tmpfs:
+      # SQLite spills temp b-trees/sorters to SQLITE_TMPDIR/TMPDIR on large
+      # queries -- read_only below would otherwise fail those with
+      # "unable to open database file" once a recalc/export is big enough.
+      - /tmp
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

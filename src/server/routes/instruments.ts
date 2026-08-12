@@ -1,5 +1,4 @@
 import type { FastifyPluginAsync } from 'fastify'
-import type { InstrumentStore } from '../repositories/index.ts'
 import type { CreateInstrumentBody, UpdateInstrumentBody } from '../../shared/types.ts'
 
 const INSTRUMENT_TYPES = ['equity', 'fund', 'etf', 'reit']
@@ -26,15 +25,15 @@ export const instrumentRoutes: FastifyPluginAsync = async (app) => {
           type: 'object',
           required: ['ticker', 'name', 'currency'],
           properties: {
-            ticker:               { type: 'string', minLength: 1, maxLength: 32 },
-            isin:                 { type: 'string', pattern: '^[A-Z]{2}[A-Z0-9]{10}$' },
-            name:                 { type: 'string', minLength: 1, maxLength: 256 },
-            currency:             { type: 'string', minLength: 3, maxLength: 3 },
-            exchange:             { type: 'string', maxLength: 32 },
-            instrumentType:       { type: 'string', enum: INSTRUMENT_TYPES },
-            isEmployerStock:      { type: 'boolean' },
+            ticker: { type: 'string', minLength: 1, maxLength: 32 },
+            isin: { type: 'string', pattern: '^[A-Z]{2}[A-Z0-9]{10}$' },
+            name: { type: 'string', minLength: 1, maxLength: 256 },
+            currency: { type: 'string', minLength: 3, maxLength: 3 },
+            exchange: { type: 'string', maxLength: 32 },
+            instrumentType: { type: 'string', enum: INSTRUMENT_TYPES },
+            isEmployerStock: { type: 'boolean' },
             rsuWithholdingMethod: { type: 'string', enum: RSU_METHODS },
-            notes:                { type: 'string', maxLength: 2048 },
+            notes: { type: 'string', maxLength: 2048 },
           },
         },
       },
@@ -46,7 +45,8 @@ export const instrumentRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(201).send(instrument)
       } catch (err) {
         const msg = (err as Error).message
-        if (msg.includes('UNIQUE')) return reply.status(409).send({ error: 'Ticker already exists' })
+        if (msg.includes('UNIQUE'))
+          return reply.status(409).send({ error: 'Ticker already exists' })
         throw err
       }
     },
@@ -59,22 +59,27 @@ export const instrumentRoutes: FastifyPluginAsync = async (app) => {
         body: {
           type: 'object',
           properties: {
-            ticker:               { type: 'string', minLength: 1, maxLength: 32 },
-            isin:                 { type: 'string', pattern: '^[A-Z]{2}[A-Z0-9]{10}$' },
-            name:                 { type: 'string', minLength: 1, maxLength: 256 },
-            currency:             { type: 'string', minLength: 3, maxLength: 3 },
-            exchange:             { type: 'string', maxLength: 32 },
-            instrumentType:       { type: 'string', enum: INSTRUMENT_TYPES },
-            isEmployerStock:      { type: 'boolean' },
+            ticker: { type: 'string', minLength: 1, maxLength: 32 },
+            isin: { type: 'string', pattern: '^[A-Z]{2}[A-Z0-9]{10}$' },
+            name: { type: 'string', minLength: 1, maxLength: 256 },
+            currency: { type: 'string', minLength: 3, maxLength: 3 },
+            exchange: { type: 'string', maxLength: 32 },
+            instrumentType: { type: 'string', enum: INSTRUMENT_TYPES },
+            isEmployerStock: { type: 'boolean' },
             rsuWithholdingMethod: { type: 'string', enum: RSU_METHODS },
-            notes:                { type: 'string', maxLength: 2048 },
+            notes: { type: 'string', maxLength: 2048 },
           },
         },
       },
     },
     async (req, reply) => {
       const user = req.session.user!
-      const instrument = app.instruments.update(user.tenantId, parseInt(req.params.id, 10), req.body, user.id)
+      const instrument = app.instruments.update(
+        user.tenantId,
+        parseInt(req.params.id, 10),
+        req.body,
+        user.id,
+      )
       if (!instrument) return reply.status(404).send({ error: 'Not found' })
       return instrument
     },

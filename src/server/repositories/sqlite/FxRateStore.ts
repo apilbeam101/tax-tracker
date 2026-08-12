@@ -1,6 +1,6 @@
+import type { FxRate, FxRateType } from '../../../shared/types.ts'
 import type { Db } from '../../db/database.ts'
 import type { FxRateStore } from '../index.ts'
-import type { FxRate, FxRateType } from '../../../shared/types.ts'
 
 interface FxRateRow {
   id: number
@@ -29,9 +29,11 @@ function toFxRate(row: FxRateRow): FxRate {
 export function createFxRateStore(db: Db): FxRateStore {
   return {
     get(fromCurrency, toCurrency, rateDate, rateType) {
-      const row = db.prepare(
-        'SELECT * FROM fx_rate WHERE from_currency = ? AND to_currency = ? AND rate_date = ? AND rate_type = ?'
-      ).get(fromCurrency, toCurrency, rateDate, rateType) as FxRateRow | undefined
+      const row = db
+        .prepare(
+          'SELECT * FROM fx_rate WHERE from_currency = ? AND to_currency = ? AND rate_date = ? AND rate_type = ?',
+        )
+        .get(fromCurrency, toCurrency, rateDate, rateType) as FxRateRow | undefined
       return row ? toFxRate(row) : undefined
     },
 
@@ -41,15 +43,26 @@ export function createFxRateStore(db: Db): FxRateStore {
         VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT (from_currency, to_currency, rate_date, rate_type)
         DO UPDATE SET rate = excluded.rate, source = excluded.source, fetched_at = datetime('now')
-      `).run(rate.fromCurrency, rate.toCurrency, rate.rateDate, rate.rate, rate.rateType, rate.source)
+      `).run(
+        rate.fromCurrency,
+        rate.toCurrency,
+        rate.rateDate,
+        rate.rate,
+        rate.rateType,
+        rate.source,
+      )
       return this.get(rate.fromCurrency, rate.toCurrency, rate.rateDate, rate.rateType)!
     },
 
     listForMonth(fromCurrency, toCurrency, year, month) {
       const prefix = `${String(year)}-${String(month).padStart(2, '0')}`
-      return (db.prepare(
-        "SELECT * FROM fx_rate WHERE from_currency = ? AND to_currency = ? AND rate_date LIKE ? ORDER BY rate_date"
-      ).all(fromCurrency, toCurrency, `${prefix}%`) as unknown as FxRateRow[]).map(toFxRate)
+      return (
+        db
+          .prepare(
+            'SELECT * FROM fx_rate WHERE from_currency = ? AND to_currency = ? AND rate_date LIKE ? ORDER BY rate_date',
+          )
+          .all(fromCurrency, toCurrency, `${prefix}%`) as unknown as FxRateRow[]
+      ).map(toFxRate)
     },
   }
 }

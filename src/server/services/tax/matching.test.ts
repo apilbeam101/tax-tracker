@@ -1,12 +1,14 @@
-import { describe, it, expect } from 'vitest'
 import Big from 'big.js'
-import { matchDisposals, taxYearForDate, type CgtDisposalRecord } from './matching.ts'
+import { describe, expect, it } from 'vitest'
 import type { Transaction } from '../../../shared/types.ts'
+import { type CgtDisposalRecord, matchDisposals, taxYearForDate } from './matching.ts'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 let _id = 0
-function txn(overrides: Partial<Transaction> & Pick<Transaction, 'txnType' | 'txnDate' | 'quantity'>): Transaction {
+function txn(
+  overrides: Partial<Transaction> & Pick<Transaction, 'txnType' | 'txnDate' | 'quantity'>,
+): Transaction {
   return {
     id: ++_id,
     tenantId: 1,
@@ -100,13 +102,23 @@ describe('matchDisposals — S104 pool', () => {
 
 describe('matchDisposals — same-day rule', () => {
   it('sell and buy on same day → same-day match (not S104)', () => {
-    const t1 = txn({ txnType: 'BUY', txnDate: '2024-01-10', quantity: '100', unitPriceGbp: '10.00' })
-    const t2 = txn({ txnType: 'SELL', txnDate: '2024-06-01', quantity: '100', unitPriceGbp: '20.00' })
+    const t1 = txn({
+      txnType: 'BUY',
+      txnDate: '2024-01-10',
+      quantity: '100',
+      unitPriceGbp: '10.00',
+    })
+    const t2 = txn({
+      txnType: 'SELL',
+      txnDate: '2024-06-01',
+      quantity: '100',
+      unitPriceGbp: '20.00',
+    })
     const t3 = txn({ txnType: 'BUY', txnDate: '2024-06-01', quantity: '50', unitPriceGbp: '19.00' })
     const { disposals, pool } = matchDisposals([t1, t2, t3])
     // 50 of the sell matches same-day buy at £19; 50 from S104 at £10
-    const sdMatch = disposals.find(d => d.matchType === 'same-day')!
-    const poolMatch = disposals.find(d => d.matchType === 's104-pool')!
+    const sdMatch = disposals.find((d) => d.matchType === 'same-day')!
+    const poolMatch = disposals.find((d) => d.matchType === 's104-pool')!
     expect(sdMatch).toBeDefined()
     expect(poolMatch).toBeDefined()
     expect(new Big(sdMatch.quantity).toFixed(0)).toBe('50')
@@ -132,8 +144,8 @@ describe('matchDisposals — 30-day B&B rule', () => {
       txn({ txnType: 'BUY', txnDate: '2024-05-16', quantity: '50', unitPriceGbp: '22.00' }),
     ]
     const { disposals } = matchDisposals(txns)
-    const bbMatch = disposals.find(d => d.matchType === '30-day')!
-    const poolMatch = disposals.find(d => d.matchType === 's104-pool')!
+    const bbMatch = disposals.find((d) => d.matchType === '30-day')!
+    const poolMatch = disposals.find((d) => d.matchType === 's104-pool')!
     expect(bbMatch).toBeDefined()
     expect(poolMatch).toBeDefined()
     expect(new Big(bbMatch.quantity).toFixed(0)).toBe('50')
@@ -150,7 +162,7 @@ describe('matchDisposals — 30-day B&B rule', () => {
       txn({ txnType: 'BUY', txnDate: '2024-06-01', quantity: '100', unitPriceGbp: '22.00' }), // day 31
     ]
     const { disposals } = matchDisposals(txns)
-    expect(disposals.every(d => d.matchType === 's104-pool')).toBe(true)
+    expect(disposals.every((d) => d.matchType === 's104-pool')).toBe(true)
   })
 })
 
@@ -171,7 +183,7 @@ describe('matchDisposals — disposal spanning all three match types', () => {
     const { disposals } = matchDisposals(txns)
     // Should have: 50 same-day, 50 B&B, 100 S104 = 3 disposal records
     expect(disposals).toHaveLength(3)
-    const byType = Object.fromEntries(disposals.map(d => [d.matchType, d]))
+    const byType = Object.fromEntries(disposals.map((d) => [d.matchType, d]))
     expect(byType['same-day']).toBeDefined()
     expect(byType['30-day']).toBeDefined()
     expect(byType['s104-pool']).toBeDefined()
@@ -206,7 +218,12 @@ describe('matchDisposals — RSU vest then sale', () => {
 describe('matchDisposals — DRIP enters S104 pool', () => {
   it('DRIP transactions add shares to the pool', () => {
     const txns = [
-      txn({ txnType: 'ESPP_PURCHASE', txnDate: '2021-01-01', quantity: '545', unitPriceGbp: '30.00' }),
+      txn({
+        txnType: 'ESPP_PURCHASE',
+        txnDate: '2021-01-01',
+        quantity: '545',
+        unitPriceGbp: '30.00',
+      }),
       txn({ txnType: 'DRIP', txnDate: '2021-01-15', quantity: '5', unitPriceGbp: '32.00' }),
       txn({ txnType: 'DRIP', txnDate: '2021-02-15', quantity: '8.86', unitPriceGbp: '34.00' }),
       txn({ txnType: 'SELL', txnDate: '2021-03-22', quantity: '558.86', unitPriceGbp: '35.00' }),

@@ -1,0 +1,16 @@
+# Unlike .gitignore, dockerignore patterns are NOT recursive by default --
+# a bare `node_modules` only matches the context root, missing e.g. the
+# stale Vite/vitest dep-optimizer cache under src/client/node_modules/.
+# Every pattern below is anchored with **/ so it matches at any depth.
+**/node_modules
+**/.git
+**/.env
+**/.env.*
+!**/.env.example
+**/data
+**/dist
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/.claude
+**/coverage

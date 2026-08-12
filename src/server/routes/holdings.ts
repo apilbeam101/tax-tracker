@@ -42,7 +42,12 @@ export const holdingRoutes: FastifyPluginAsync = async (app) => {
       const today = req.body.date ?? new Date().toISOString().slice(0, 10)
       const instruments = app.instruments.list(user.tenantId)
 
-      const results: { ticker: string; priceDate: string | null; closePrice: string | null; error: string | null }[] = []
+      const results: {
+        ticker: string
+        priceDate: string | null
+        closePrice: string | null
+        error: string | null
+      }[] = []
 
       for (const inst of instruments) {
         try {
@@ -80,7 +85,7 @@ export const holdingRoutes: FastifyPluginAsync = async (app) => {
           properties: {
             instrumentId: { type: 'integer', minimum: 1 },
             from: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
-            to:   { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+            to: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
           },
         },
       },
@@ -91,7 +96,13 @@ export const holdingRoutes: FastifyPluginAsync = async (app) => {
       const inst = app.instruments.getById(user.tenantId, instrumentId)
       if (!inst) return reply.status(404).send({ error: 'Instrument not found' })
 
-      const prices = await app.priceService.fetchRange(inst.id, inst.ticker, inst.currency, from, to)
+      const prices = await app.priceService.fetchRange(
+        inst.id,
+        inst.ticker,
+        inst.currency,
+        from,
+        to,
+      )
       return { fetched: prices.length, from, to }
     },
   )

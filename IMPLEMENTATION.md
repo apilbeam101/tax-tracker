@@ -469,6 +469,47 @@ as it isn't derivable from the stored data.
 
 ---
 
+## Phase 8 — Repository hygiene, error handling, and packaging ✅ COMPLETE
+
+**Goal:** close CI/security/testing gaps found by comparing against a sibling project's
+more mature setup; add Docker as an additional self-hosting option. See DESIGN.md §12
+for rationale.
+
+**Deliverables:**
+
+- [x] Replace ESLint (dependency present, no working config, `npm run lint` failed
+  outright) with Biome — `typescript-eslint` doesn't support this project's TypeScript
+  version as a peer dependency.
+- [x] CI (`.github/workflows/ci.yml`): lint, typecheck, test, build on every push/PR;
+  separate `npm audit --omit=dev --audit-level=high` job.
+- [x] `npm run typecheck` extended to cover `scripts/` (previously ungated — two
+  pre-existing type errors there fixed as part of this).
+- [x] Secret scanning (`.github/workflows/secrets.yml`, `.gitleaks.toml`): gitleaks on
+  push/PR plus a monthly full-history scan.
+- [x] Dependabot (`.github/dependabot.yml`): monthly npm + github-actions updates.
+- [x] Centralized error handling (`src/server/errors.ts`): `HttpError` taxonomy +
+  global `setErrorHandler` — unclassified errors no longer leak internal detail to the
+  client.
+- [x] Structured env-config validation (`src/server/config/env.ts`): reports every
+  missing/invalid variable at once; validates `PORT` and `FX_RATE_POLICY`.
+- [x] Log redaction (`src/server/config/logging.ts`): cookies/auth headers/API
+  keys/secrets scrubbed from Pino output.
+- [x] Fixture-based tests for the Tiingo, HMRC monthly CSV, and Frankfurter parsers
+  (previously thin/no coverage of the actual parsing logic).
+- [x] `CHANGELOG.md` (Keep a Changelog format).
+- [x] Docker packaging (`Dockerfile`, `.dockerignore`, `deploy/docker-compose.yml`,
+  README "Docker" section) — non-root UID, `read_only` filesystem, `init: true`,
+  loopback-only published port.
+- [x] `PRAGMA temp_store = MEMORY` (`src/server/db/database.ts`) — SQLite never needs a
+  writable temp directory, in any deployment mode.
+
+**Deliberately out of scope** (tracked as backlog, not forgotten): `svelte-check` for the
+untested Svelte client; a `Dockerfile`/CI multi-OS matrix, SBOM, or provenance attestation
+(disproportionate for a personal self-hosted app, not a distributed package/image); test
+coverage for routes/auth/most repositories/the client.
+
+---
+
 ## Implementation notes for contributors
 
 ### Running tests
@@ -496,13 +537,17 @@ const cost = new Big(quantity).times(new Big(unitPriceGbp))
 const cost = parseFloat(quantity) * parseFloat(unitPriceGbp)
 ```
 
-An ESLint rule should enforce this in CI.
+Not currently enforced by a lint rule — Biome (see §12/Phase 8) doesn't have an
+off-the-shelf rule for this, and a custom one hasn't been written. `npm run lint` now
+gives CI (`.github/workflows/ci.yml`) somewhere to add one if this becomes a real problem
+in practice.
 
 ### Database column type rule
 
 **Never declare a monetary column as `REAL` or `NUMERIC` in SQL migrations.** Always
-use `TEXT`. Add a migration lint step to CI that `grep`s migrations for `REAL` on
-monetary columns.
+use `TEXT`. Not currently enforced automatically — CI (`.github/workflows/ci.yml`) exists
+now as a place to add a step that `grep`s migrations for `REAL` on monetary columns, but
+nothing does yet.
 
 ### Adding a new tax year
 
@@ -514,12 +559,21 @@ merging.
 
 1. Implement the `PriceProvider` interface in `src/server/services/prices/`.
 2. Register it in the provider factory.
-3. Add unit tests covering the response parsing and error handling.
+3. Add unit tests covering the response parsing and error handling — `tiingo.test.ts` and
+   the fixture files under `services/prices/__fixtures__/` (added in Phase 8) are the
+   reference example: a realistic-but-synthetic captured response, exercised for the
+   happy path, an empty/no-data response, and the provider's specific "no data" sentinel.
 4. Document the free-tier limits and ToS restrictions in the provider file.
 
 ---
 
 ## Dependency versions (June 2026)
+
+Historical snapshot at the time this table was written — versions drift; check
+`package.json` for current. One correction directly relevant to Phase 8: `eslint` below
+was fully removed and replaced with `@biomejs/biome` (`typescript-eslint`'s peer
+dependency doesn't support the `typescript` version this project is actually on — see §12
+in DESIGN.md).
 
 | Package | Version | Notes |
 |---|---|---|

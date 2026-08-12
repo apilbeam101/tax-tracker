@@ -1,11 +1,11 @@
-import type { FxRateStore } from '../../repositories/index.ts'
 import type { FxRate } from '../../../shared/types.ts'
+import type { FxRateStore } from '../../repositories/index.ts'
 
 const BASE_URL = 'https://api.frankfurter.dev/v1'
 const SOURCE = 'frankfurter.dev'
 
 interface FrankfurterResponse {
-  date: string         // actual date used (may differ from requested — weekends roll back)
+  date: string // actual date used (may differ from requested — weekends roll back)
   base: string
   rates: Record<string, number>
 }
@@ -15,7 +15,7 @@ interface FrankfurterResponse {
 export async function getFrankfurterRate(
   fromCurrency: string,
   toCurrency: string,
-  date: string,          // YYYY-MM-DD (weekends will roll back to Friday)
+  date: string, // YYYY-MM-DD (weekends will roll back to Friday)
   store: FxRateStore,
 ): Promise<FxRate> {
   // Check cache for the requested date first (may already have it from a prior fetch)
@@ -27,7 +27,7 @@ export async function getFrankfurterRate(
   if (!res.ok) {
     throw new Error(`Frankfurter fetch failed: ${res.status} ${res.statusText} (${url})`)
   }
-  const data = await res.json() as FrankfurterResponse
+  const data = (await res.json()) as FrankfurterResponse
 
   const rate = data.rates[toCurrency]
   if (rate === undefined) {

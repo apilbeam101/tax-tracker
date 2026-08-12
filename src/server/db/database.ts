@@ -4,9 +4,10 @@
  * Uses the built-in node:sqlite module (Node >=24, no native addon).
  * WAL mode is enabled for concurrent reads during writes.
  */
+
+import { mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { readFileSync, readdirSync, mkdirSync } from 'node:fs'
-import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -30,6 +31,10 @@ export async function initDb(dbPath: string): Promise<Db> {
   db.exec('PRAGMA cache_size = -4000')
   // Synchronous = NORMAL is safe with WAL
   db.exec('PRAGMA synchronous = NORMAL')
+  // Keep temp b-trees/sorters in memory rather than spilling to
+  // SQLITE_TMPDIR/TMPDIR -- avoids depending on a writable temp directory
+  // at all (e.g. under a read-only container filesystem).
+  db.exec('PRAGMA temp_store = MEMORY')
 
   await runMigrations(db)
   return db
@@ -47,12 +52,15 @@ async function runMigrations(db: Db): Promise<void> {
 
   const migrationsDir = join(__dirname, 'migrations')
   const applied = new Set(
-    (db.prepare('SELECT filename FROM _migrations ORDER BY id').all() as Array<{filename: string}>)
-      .map(r => r.filename)
+    (
+      db.prepare('SELECT filename FROM _migrations ORDER BY id').all() as Array<{
+        filename: string
+      }>
+    ).map((r) => r.filename),
   )
 
   const files = readdirSync(migrationsDir)
-    .filter(f => f.endsWith('.sql'))
+    .filter((f) => f.endsWith('.sql'))
     .sort() // lexicographic — filename prefix 001_, 002_ etc. determines order
 
   for (const file of files) {
@@ -71,7 +79,11 @@ async function runMigrations(db: Db): Promise<void> {
       // Guard the rollback — if the migration SQL caused an implicit commit
       // (or SQLite already rolled back internally), ROLLBACK itself will throw
       // and would mask the original error.
-      try { db.exec('ROLLBACK') } catch { /* ignore secondary rollback failure */ }
+      try {
+        db.exec('ROLLBACK')
+      } catch {
+        /* ignore secondary rollback failure */
+      }
       throw new Error(`Migration failed: ${file}\n${(err as Error).message}`)
     }
   }

@@ -1,14 +1,14 @@
-import { describe, it, expect } from 'vitest'
-import { mapCsvToTransactions, validRows, toCreateBody } from './csv-mapper.ts'
+import { describe, expect, it } from 'vitest'
 import type { ColumnMapping } from './csv-mapper.ts'
+import { mapCsvToTransactions, toCreateBody, validRows } from './csv-mapper.ts'
 
 // ── Basic mapping ──────────────────────────────────────────────────────────────
 
 const BASIC_MAPPINGS: ColumnMapping[] = [
-  { source: 'Type',     target: 'txnType' },
-  { source: 'Date',     target: 'txnDate' },
-  { source: 'Shares',   target: 'quantity' },
-  { source: 'Price',    target: 'unitPriceNative' },
+  { source: 'Type', target: 'txnType' },
+  { source: 'Date', target: 'txnDate' },
+  { source: 'Shares', target: 'quantity' },
+  { source: 'Price', target: 'unitPriceNative' },
   { source: 'Currency', target: 'nativeCurrency' },
 ]
 
@@ -47,8 +47,8 @@ describe('mapCsvToTransactions', () => {
   it('reports error for unknown txnType', () => {
     const csv = `Type,Date,Shares\nFOO,2024-04-01,100\n`
     const mappings: ColumnMapping[] = [
-      { source: 'Type',  target: 'txnType' },
-      { source: 'Date',  target: 'txnDate' },
+      { source: 'Type', target: 'txnType' },
+      { source: 'Date', target: 'txnDate' },
       { source: 'Shares', target: 'quantity' },
     ]
     const rows = mapCsvToTransactions(csv, mappings)
@@ -58,33 +58,33 @@ describe('mapCsvToTransactions', () => {
   it('reports error for missing required field txnDate', () => {
     const csv = `Type,Shares\nBUY,100\n`
     const mappings: ColumnMapping[] = [
-      { source: 'Type',   target: 'txnType' },
+      { source: 'Type', target: 'txnType' },
       { source: 'Shares', target: 'quantity' },
     ]
     const rows = mapCsvToTransactions(csv, mappings)
-    expect(rows[0]!.errors.some(e => e.includes('txnDate'))).toBe(true)
+    expect(rows[0]!.errors.some((e) => e.includes('txnDate'))).toBe(true)
   })
 
   it('reports error for invalid decimal quantity', () => {
     const csv = `Type,Date,Shares\nBUY,2024-04-01,1e5\n`
     const mappings: ColumnMapping[] = [
-      { source: 'Type',   target: 'txnType' },
-      { source: 'Date',   target: 'txnDate' },
+      { source: 'Type', target: 'txnType' },
+      { source: 'Date', target: 'txnDate' },
       { source: 'Shares', target: 'quantity' },
     ]
     const rows = mapCsvToTransactions(csv, mappings)
-    expect(rows[0]!.errors.some(e => e.includes('quantity'))).toBe(true)
+    expect(rows[0]!.errors.some((e) => e.includes('quantity'))).toBe(true)
   })
 
   it('reports error for invalid date format', () => {
     const csv = `Type,Date,Shares\nBUY,01/04/2024,100\n`
     const mappings: ColumnMapping[] = [
-      { source: 'Type',   target: 'txnType' },
-      { source: 'Date',   target: 'txnDate' },
+      { source: 'Type', target: 'txnType' },
+      { source: 'Date', target: 'txnDate' },
       { source: 'Shares', target: 'quantity' },
     ]
     const rows = mapCsvToTransactions(csv, mappings)
-    expect(rows[0]!.errors.some(e => e.includes('txnDate'))).toBe(true)
+    expect(rows[0]!.errors.some((e) => e.includes('txnDate'))).toBe(true)
   })
 
   it('returns empty array for empty CSV', () => {
@@ -96,9 +96,9 @@ describe('mapCsvToTransactions', () => {
   it('static transform overrides the source column', () => {
     const csv = `Date,Shares\n2024-04-01,100\n`
     const mappings: ColumnMapping[] = [
-      { source: 'Date',   target: 'txnDate' },
+      { source: 'Date', target: 'txnDate' },
       { source: 'Shares', target: 'quantity' },
-      { source: 'Date',   target: 'txnType', transform: { kind: 'static', value: 'BUY' } },
+      { source: 'Date', target: 'txnType', transform: { kind: 'static', value: 'BUY' } },
     ]
     const rows = mapCsvToTransactions(csv, mappings)
     expect(rows[0]!.txnType).toBe('BUY')
@@ -108,8 +108,12 @@ describe('mapCsvToTransactions', () => {
   it('map transform remaps raw value to internal value', () => {
     const csv = `Action,Date,Shares\nBought,2024-04-01,100\n`
     const mappings: ColumnMapping[] = [
-      { source: 'Action', target: 'txnType', transform: { kind: 'map', values: { Bought: 'BUY', Sold: 'SELL' } } },
-      { source: 'Date',   target: 'txnDate' },
+      {
+        source: 'Action',
+        target: 'txnType',
+        transform: { kind: 'map', values: { Bought: 'BUY', Sold: 'SELL' } },
+      },
+      { source: 'Date', target: 'txnDate' },
       { source: 'Shares', target: 'quantity' },
     ]
     const rows = mapCsvToTransactions(csv, mappings)
@@ -120,8 +124,12 @@ describe('mapCsvToTransactions', () => {
   it('dateReformat transform converts DD/MM/YYYY to YYYY-MM-DD', () => {
     const csv = `Type,Date,Shares\nBUY,01/04/2024,100\n`
     const mappings: ColumnMapping[] = [
-      { source: 'Type',   target: 'txnType' },
-      { source: 'Date',   target: 'txnDate', transform: { kind: 'dateReformat', fromFormat: 'DD/MM/YYYY' } },
+      { source: 'Type', target: 'txnType' },
+      {
+        source: 'Date',
+        target: 'txnDate',
+        transform: { kind: 'dateReformat', fromFormat: 'DD/MM/YYYY' },
+      },
       { source: 'Shares', target: 'quantity' },
     ]
     const rows = mapCsvToTransactions(csv, mappings)
@@ -132,8 +140,12 @@ describe('mapCsvToTransactions', () => {
   it('dateReformat transform converts MM/DD/YYYY to YYYY-MM-DD', () => {
     const csv = `Type,Date,Shares\nBUY,04/01/2024,100\n`
     const mappings: ColumnMapping[] = [
-      { source: 'Type',   target: 'txnType' },
-      { source: 'Date',   target: 'txnDate', transform: { kind: 'dateReformat', fromFormat: 'MM/DD/YYYY' } },
+      { source: 'Type', target: 'txnType' },
+      {
+        source: 'Date',
+        target: 'txnDate',
+        transform: { kind: 'dateReformat', fromFormat: 'MM/DD/YYYY' },
+      },
       { source: 'Shares', target: 'quantity' },
     ]
     const rows = mapCsvToTransactions(csv, mappings)
@@ -167,8 +179,8 @@ describe('ticker field', () => {
     const csv = `Ticker,Type,Date,Shares\nCSCO,BUY,2024-04-01,100\nAAPL,SELL,2025-01-15,50\n`
     const mappings: ColumnMapping[] = [
       { source: 'Ticker', target: 'ticker' },
-      { source: 'Type',   target: 'txnType' },
-      { source: 'Date',   target: 'txnDate' },
+      { source: 'Type', target: 'txnType' },
+      { source: 'Date', target: 'txnDate' },
       { source: 'Shares', target: 'quantity' },
     ]
     const rows = mapCsvToTransactions(csv, mappings)

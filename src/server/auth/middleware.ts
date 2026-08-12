@@ -1,4 +1,4 @@
-import type { FastifyRequest, FastifyReply } from 'fastify'
+import type { FastifyReply, FastifyRequest } from 'fastify'
 
 export interface SessionUser {
   id: number
@@ -16,10 +16,7 @@ declare module '@fastify/session' {
  * Fastify preHandler hook — rejects requests without a valid session.
  * Applied to all routes under /api (except /api/auth/*).
  */
-export async function requireAuth(
-  req: FastifyRequest,
-  reply: FastifyReply,
-): Promise<void> {
+export async function requireAuth(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   if (!req.session.user) {
     return reply.status(401).send({ error: 'Authentication required' })
   }

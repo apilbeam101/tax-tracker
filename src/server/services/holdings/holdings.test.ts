@@ -1,9 +1,9 @@
-import { describe, it, expect, vi } from 'vitest'
-import { computeHoldings } from './valuation.ts'
+import { describe, expect, it, vi } from 'vitest'
 import type { Instrument, Price } from '../../../shared/types.ts'
 import type { S104PoolStore } from '../../repositories/sqlite/S104PoolStore.ts'
-import type { PriceService } from '../prices/cache.ts'
 import type { FxService } from '../fx/index.ts'
+import type { PriceService } from '../prices/cache.ts'
+import { computeHoldings } from './valuation.ts'
 
 function makeInstrument(overrides: Partial<Instrument> = {}): Instrument {
   return {
@@ -40,8 +40,20 @@ function makePriceService(price: Price | null): PriceService {
 
 function makeFxService(rate: string): FxService {
   return {
-    getRate: vi.fn(async () => ({ id: 0, fromCurrency: 'USD', toCurrency: 'GBP', rateDate: '2025-06-01', rate, rateType: 'hmrc-monthly' as const, source: 'trade-tariff.service.gov.uk', fetchedAt: '' })),
-    convert: vi.fn(async (amount) => ({ gbp: (parseFloat(amount) * parseFloat(rate)).toFixed(8), rate: { id: 0, rate } as never })),
+    getRate: vi.fn(async () => ({
+      id: 0,
+      fromCurrency: 'USD',
+      toCurrency: 'GBP',
+      rateDate: '2025-06-01',
+      rate,
+      rateType: 'hmrc-monthly' as const,
+      source: 'trade-tariff.service.gov.uk',
+      fetchedAt: '',
+    })),
+    convert: vi.fn(async (amount) => ({
+      gbp: (parseFloat(amount) * parseFloat(rate)).toFixed(8),
+      rate: { id: 0, rate } as never,
+    })),
   }
 }
 
@@ -51,7 +63,14 @@ describe('HoldingsValuation', () => {
     // Pool: 100 shares, cost £4 000
     const s104 = makeS104Store('100', '4000')
     // Latest price: $55.12, FX 0.79
-    const price: Price = { id: 1, instrumentId: 1, priceDate: '2025-06-01', closePrice: '55.12', source: 'tiingo', fetchedAt: '' }
+    const price: Price = {
+      id: 1,
+      instrumentId: 1,
+      priceDate: '2025-06-01',
+      closePrice: '55.12',
+      source: 'tiingo',
+      fetchedAt: '',
+    }
     const priceSvc = makePriceService(price)
     const fx = makeFxService('0.79')
 
@@ -98,7 +117,14 @@ describe('HoldingsValuation', () => {
   it('handles GBP-denominated instruments without FX conversion', async () => {
     const inst = makeInstrument({ currency: 'GBP', ticker: 'LLOY' })
     const s104 = makeS104Store('10000', '500')
-    const price: Price = { id: 2, instrumentId: 1, priceDate: '2025-06-01', closePrice: '0.065', source: 'yahoo', fetchedAt: '' }
+    const price: Price = {
+      id: 2,
+      instrumentId: 1,
+      priceDate: '2025-06-01',
+      closePrice: '0.065',
+      source: 'yahoo',
+      fetchedAt: '',
+    }
     const priceSvc = makePriceService(price)
     // FX for GBP→GBP is identity rate=1
     const fx = makeFxService('1')

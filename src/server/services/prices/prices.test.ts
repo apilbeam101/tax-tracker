@@ -1,8 +1,8 @@
-import { describe, it, expect, vi } from 'vitest'
-import { createPriceService } from './cache.ts'
-import type { PriceStore } from '../../repositories/index.ts'
-import type { PriceProvider } from './provider.ts'
+import { describe, expect, it, vi } from 'vitest'
 import type { Price } from '../../../shared/types.ts'
+import type { PriceStore } from '../../repositories/index.ts'
+import { createPriceService } from './cache.ts'
+import type { PriceProvider } from './provider.ts'
 
 function makePrice(overrides: Partial<Price> = {}): Price {
   return {
@@ -21,7 +21,7 @@ function makeStore(cached?: Price): PriceStore & { upserted: Price[] } {
   return {
     upserted,
     get: vi.fn((_, __) => cached),
-    getLatest: vi.fn((id) => upserted.filter(p => p.instrumentId === id).at(-1) ?? cached),
+    getLatest: vi.fn((id) => upserted.filter((p) => p.instrumentId === id).at(-1) ?? cached),
     upsert: vi.fn((p) => {
       const price = makePrice({ ...p })
       upserted.push(price)
@@ -30,11 +30,14 @@ function makeStore(cached?: Price): PriceStore & { upserted: Price[] } {
   }
 }
 
-function makeProvider(result: Omit<Price, 'id' | 'fetchedAt' | 'instrumentId'> | null, name = 'mock'): PriceProvider {
+function makeProvider(
+  result: Omit<Price, 'id' | 'fetchedAt' | 'instrumentId'> | null,
+  name = 'mock',
+): PriceProvider {
   return {
     name,
     getPrice: vi.fn(async () => result),
-    getHistoricalPrices: vi.fn(async () => result ? [result] : []),
+    getHistoricalPrices: vi.fn(async () => (result ? [result] : [])),
   }
 }
 
@@ -44,7 +47,11 @@ describe('PriceService — cache hit', () => {
   it('returns the cached price without calling the provider', async () => {
     const cached = makePrice()
     const store = makeStore(cached)
-    const provider = makeProvider({ priceDate: '2025-06-01', closePrice: '55.12', source: 'tiingo' })
+    const provider = makeProvider({
+      priceDate: '2025-06-01',
+      closePrice: '55.12',
+      source: 'tiingo',
+    })
     const svc = createPriceService(store, [provider])
 
     const result = await svc.getPrice(42, 'CSCO', 'USD', '2025-06-01')
@@ -72,7 +79,10 @@ describe('PriceService — cache miss', () => {
     const store = makeStore(undefined)
     const failing = makeProvider(null, 'tiingo')
     ;(failing.getPrice as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('HTTP 500'))
-    const fallback = makeProvider({ priceDate: '2025-06-01', closePrice: '55.00', source: 'yahoo' }, 'yahoo')
+    const fallback = makeProvider(
+      { priceDate: '2025-06-01', closePrice: '55.00', source: 'yahoo' },
+      'yahoo',
+    )
     const svc = createPriceService(store, [failing, fallback])
 
     const result = await svc.getPrice(42, 'CSCO', 'USD', '2025-06-01')
@@ -114,17 +124,23 @@ describe('PriceService — fetchRange', () => {
 
 import { createYahooProvider } from './yahoo.ts'
 
-function makeYahooResponse(timestamps: number[], closes: (number | null)[], adjcloses?: (number | null)[]) {
+function makeYahooResponse(
+  timestamps: number[],
+  closes: (number | null)[],
+  adjcloses?: (number | null)[],
+) {
   return {
     chart: {
-      result: [{
-        meta: { currency: 'USD' },
-        timestamp: timestamps,
-        indicators: {
-          quote: [{ close: closes }],
-          adjclose: [{ adjclose: adjcloses ?? closes }],
+      result: [
+        {
+          meta: { currency: 'USD' },
+          timestamp: timestamps,
+          indicators: {
+            quote: [{ close: closes }],
+            adjclose: [{ adjclose: adjcloses ?? closes }],
+          },
         },
-      }],
+      ],
       error: null,
     },
   }
@@ -133,10 +149,13 @@ function makeYahooResponse(timestamps: number[], closes: (number | null)[], adjc
 describe('Yahoo Finance provider — response parsing', () => {
   it('parses a valid JSON response with two trading days', async () => {
     const data = makeYahooResponse(
-      [1748736000, 1748822400],  // 2025-06-01, 2025-06-02
-      [55.12, 55.50],
+      [1748736000, 1748822400], // 2025-06-01, 2025-06-02
+      [55.12, 55.5],
     )
-    global.fetch = vi.fn(async () => ({ ok: true, json: async () => data })) as unknown as typeof fetch
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => data,
+    })) as unknown as typeof fetch
 
     const provider = createYahooProvider()
     const results = await provider.getHistoricalPrices('CSCO', 'USD', '2025-06-01', '2025-06-02')
@@ -146,8 +165,11 @@ describe('Yahoo Finance provider — response parsing', () => {
   })
 
   it('uses adjclose when available', async () => {
-    const data = makeYahooResponse([1748736000], [55.12], [54.80])
-    global.fetch = vi.fn(async () => ({ ok: true, json: async () => data })) as unknown as typeof fetch
+    const data = makeYahooResponse([1748736000], [55.12], [54.8])
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => data,
+    })) as unknown as typeof fetch
 
     const provider = createYahooProvider()
     const results = await provider.getHistoricalPrices('CSCO', 'USD', '2025-06-01', '2025-06-01')
@@ -156,7 +178,10 @@ describe('Yahoo Finance provider — response parsing', () => {
 
   it('skips null price rows', async () => {
     const data = makeYahooResponse([1748736000, 1748822400], [55.12, null])
-    global.fetch = vi.fn(async () => ({ ok: true, json: async () => data })) as unknown as typeof fetch
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => data,
+    })) as unknown as typeof fetch
 
     const provider = createYahooProvider()
     const results = await provider.getHistoricalPrices('CSCO', 'USD', '2025-06-01', '2025-06-02')
@@ -164,8 +189,16 @@ describe('Yahoo Finance provider — response parsing', () => {
   })
 
   it('returns empty array when chart result is null', async () => {
-    const data = { chart: { result: null, error: { code: 'Not Found', description: 'No fundamentals data found' } } }
-    global.fetch = vi.fn(async () => ({ ok: true, json: async () => data })) as unknown as typeof fetch
+    const data = {
+      chart: {
+        result: null,
+        error: { code: 'Not Found', description: 'No fundamentals data found' },
+      },
+    }
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => data,
+    })) as unknown as typeof fetch
 
     const provider = createYahooProvider()
     const results = await provider.getHistoricalPrices('INVALID', 'USD', '2025-06-01', '2025-06-02')
@@ -174,7 +207,10 @@ describe('Yahoo Finance provider — response parsing', () => {
 
   it('appends .L suffix for GBX (LSE pence) tickers', async () => {
     const data = makeYahooResponse([1748736000], [6103])
-    global.fetch = vi.fn(async () => ({ ok: true, json: async () => data })) as unknown as typeof fetch
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => data,
+    })) as unknown as typeof fetch
 
     const provider = createYahooProvider()
     await provider.getHistoricalPrices('SGLN', 'GBX', '2025-06-01', '2025-06-01')
@@ -186,18 +222,23 @@ describe('Yahoo Finance provider — response parsing', () => {
     // stored as GBP, the provider must normalise to pounds so callers don't see 100x values.
     const data = {
       chart: {
-        result: [{
-          meta: { currency: 'GBp' },
-          timestamp: [1748736000],
-          indicators: {
-            quote: [{ close: [6089.0] }],
-            adjclose: [{ adjclose: [6089.0] }],
+        result: [
+          {
+            meta: { currency: 'GBp' },
+            timestamp: [1748736000],
+            indicators: {
+              quote: [{ close: [6089.0] }],
+              adjclose: [{ adjclose: [6089.0] }],
+            },
           },
-        }],
+        ],
         error: null,
       },
     }
-    global.fetch = vi.fn(async () => ({ ok: true, json: async () => data })) as unknown as typeof fetch
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => data,
+    })) as unknown as typeof fetch
 
     const provider = createYahooProvider()
     const results = await provider.getHistoricalPrices('SGLN', 'GBP', '2025-06-01', '2025-06-01')

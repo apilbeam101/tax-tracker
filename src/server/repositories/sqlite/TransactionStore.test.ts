@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { DatabaseSync } from 'node:sqlite'
 import { readFileSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { dirname, join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
-import { createTransactionStore } from './TransactionStore.ts'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { createInstrumentStore } from './InstrumentStore.ts'
+import { createTransactionStore } from './TransactionStore.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -38,15 +38,19 @@ describe('TransactionStore', () => {
 
     const inst = instruments.create(1, { ticker: 'AAPL', name: 'Apple', currency: 'USD' }, 1)
 
-    const txn = store.create(1, {
-      instrumentId: inst.id,
-      txnType: 'BUY',
-      txnDate: '2025-01-15',
-      quantity: '100',
-      unitPriceNative: '195.50',
-      nativeCurrency: 'USD',
-      costsGbp: '9.99',
-    }, 1)
+    const txn = store.create(
+      1,
+      {
+        instrumentId: inst.id,
+        txnType: 'BUY',
+        txnDate: '2025-01-15',
+        quantity: '100',
+        unitPriceNative: '195.50',
+        nativeCurrency: 'USD',
+        costsGbp: '9.99',
+      },
+      1,
+    )
 
     expect(txn.id).toBeGreaterThan(0)
     expect(txn.quantity).toBe('100')
@@ -61,13 +65,25 @@ describe('TransactionStore', () => {
     const a = instruments.create(1, { ticker: 'AAPL', name: 'Apple', currency: 'USD' }, 1)
     const b = instruments.create(1, { ticker: 'MSFT', name: 'Microsoft', currency: 'USD' }, 1)
 
-    store.create(1, { instrumentId: a.id, txnType: 'BUY', txnDate: '2025-01-01', quantity: '10' }, 1)
-    store.create(1, { instrumentId: b.id, txnType: 'BUY', txnDate: '2025-01-02', quantity: '20' }, 1)
-    store.create(1, { instrumentId: a.id, txnType: 'SELL', txnDate: '2025-02-01', quantity: '5' }, 1)
+    store.create(
+      1,
+      { instrumentId: a.id, txnType: 'BUY', txnDate: '2025-01-01', quantity: '10' },
+      1,
+    )
+    store.create(
+      1,
+      { instrumentId: b.id, txnType: 'BUY', txnDate: '2025-01-02', quantity: '20' },
+      1,
+    )
+    store.create(
+      1,
+      { instrumentId: a.id, txnType: 'SELL', txnDate: '2025-02-01', quantity: '5' },
+      1,
+    )
 
     const forA = store.list(1, { instrumentId: a.id })
     expect(forA).toHaveLength(2)
-    expect(forA.every(t => t.instrumentId === a.id)).toBe(true)
+    expect(forA.every((t) => t.instrumentId === a.id)).toBe(true)
   })
 
   it('writes an audit log entry on create', () => {
@@ -75,7 +91,11 @@ describe('TransactionStore', () => {
     const store = createTransactionStore(db)
     const inst = instruments.create(1, { ticker: 'TSLA', name: 'Tesla', currency: 'USD' }, 1)
 
-    store.create(1, { instrumentId: inst.id, txnType: 'BUY', txnDate: '2025-03-01', quantity: '50' }, 99)
+    store.create(
+      1,
+      { instrumentId: inst.id, txnType: 'BUY', txnDate: '2025-03-01', quantity: '50' },
+      99,
+    )
 
     const log = db.prepare("SELECT * FROM audit_log WHERE action = 'txn.create'").all()
     expect(log).toHaveLength(1)
@@ -88,7 +108,11 @@ describe('TransactionStore', () => {
     const inst = instruments.create(1, { ticker: 'X', name: 'X', currency: 'GBP' }, 1)
 
     expect(() =>
-      store.create(1, { instrumentId: inst.id, txnType: 'BUY', txnDate: '2025-01-01', quantity: '1e5' }, 1)
+      store.create(
+        1,
+        { instrumentId: inst.id, txnType: 'BUY', txnDate: '2025-01-01', quantity: '1e5' },
+        1,
+      ),
     ).toThrow('Invalid decimal')
   })
 
@@ -97,8 +121,17 @@ describe('TransactionStore', () => {
     const store = createTransactionStore(db)
     const inst = instruments.create(1, { ticker: 'GOOG', name: 'Google', currency: 'USD' }, 1)
 
-    const txn = store.create(1, { instrumentId: inst.id, txnType: 'BUY', txnDate: '2025-01-01', quantity: '10' }, 1)
-    const updated = store.update(1, txn.id, { unitPriceGbp: '140.00', totalGbp: '1400.00', netGbp: '-1400.00' }, 1)
+    const txn = store.create(
+      1,
+      { instrumentId: inst.id, txnType: 'BUY', txnDate: '2025-01-01', quantity: '10' },
+      1,
+    )
+    const updated = store.update(
+      1,
+      txn.id,
+      { unitPriceGbp: '140.00', totalGbp: '1400.00', netGbp: '-1400.00' },
+      1,
+    )
     expect(updated?.unitPriceGbp).toBe('140.00')
     expect(updated?.totalGbp).toBe('1400.00')
     expect(updated?.netGbp).toBe('-1400.00')
@@ -109,7 +142,11 @@ describe('TransactionStore', () => {
     const store = createTransactionStore(db)
     const inst = instruments.create(1, { ticker: 'AMZ', name: 'Amazon', currency: 'USD' }, 1)
 
-    const txn = store.create(1, { instrumentId: inst.id, txnType: 'BUY', txnDate: '2025-01-01', quantity: '5' }, 1)
+    const txn = store.create(
+      1,
+      { instrumentId: inst.id, txnType: 'BUY', txnDate: '2025-01-01', quantity: '5' },
+      1,
+    )
     const deleted = store.delete(1, txn.id, 1)
     expect(deleted).toBe(true)
     expect(store.getById(1, txn.id)).toBeUndefined()

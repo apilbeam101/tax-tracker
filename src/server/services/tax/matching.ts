@@ -12,18 +12,21 @@
  * Inputs must have unitPriceGbp populated (i.e. after backfill-fx has run).
  */
 import Big from 'big.js'
+import { BadRequestError } from '../../errors.ts'
 
-function bigMin(a: Big, b: Big): Big { return a.lt(b) ? a : b }
-function bigMax(a: Big, b: Big): Big { return a.gt(b) ? a : b }
-import type { Transaction, MatchType } from '../../../shared/types.ts'
+function bigMin(a: Big, b: Big): Big {
+  return a.lt(b) ? a : b
+}
+
+import type { MatchType, Transaction } from '../../../shared/types.ts'
 import {
-  type S104PoolState,
-  emptyPool,
   addToPool,
-  disposeFromPool,
-  applyStockSplit,
   applyCapReturn,
   applyRightsIssue,
+  applyStockSplit,
+  disposeFromPool,
+  emptyPool,
+  type S104PoolState,
 } from './pool.ts'
 
 export interface CgtDisposalRecord {
@@ -43,7 +46,9 @@ export interface CgtDisposalRecord {
 /** Identifies which UK tax year a date falls in, e.g. "2025-26". */
 export function taxYearForDate(date: string): string {
   const parts = date.split('-').map(Number)
-  const y = parts[0]!, m = parts[1]!, d = parts[2]!
+  const y = parts[0]!,
+    m = parts[1]!,
+    d = parts[2]!
   // UK tax year runs 6 Apr to 5 Apr
   const inNewYear = m > 4 || (m === 4 && d >= 6)
   const startYear = inNewYear ? y : y - 1
@@ -192,8 +197,8 @@ export function matchDisposals(
       if (toMatch.gt(0)) {
         const poolQty = new Big(pool.quantity)
         if (poolQty.lt(toMatch)) {
-          throw new Error(
-            `Disposal of ${txn.quantity} on ${txn.txnDate} (txn #${txn.id}) exceeds S104 pool (${pool.quantity})`
+          throw new BadRequestError(
+            `Disposal of ${txn.quantity} on ${txn.txnDate} (txn #${txn.id}) exceeds S104 pool (${pool.quantity})`,
           )
         }
 
@@ -263,7 +268,9 @@ function isAcquisition(t: Transaction): boolean {
 /** Add N calendar days to an ISO date string "YYYY-MM-DD". */
 function addDays(dateStr: string, days: number): string {
   const parts = dateStr.split('-').map(Number)
-  const y = parts[0]!, m = parts[1]!, d = parts[2]!
+  const y = parts[0]!,
+    m = parts[1]!,
+    d = parts[2]!
   // Use UTC to avoid DST shifts
   const ms = Date.UTC(y, m - 1, d) + days * 86_400_000
   const dt = new Date(ms)

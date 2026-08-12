@@ -1,9 +1,12 @@
-import type { Db } from '../../db/database.ts'
-import type { TransactionStore } from '../index.ts'
 import type {
-  Transaction, TransactionType, FxRateType, RsuWithholdingMethod,
-  CreateTransactionBody, UpdateTransactionBody,
+  FxRateType,
+  RsuWithholdingMethod,
+  Transaction,
+  TransactionType,
 } from '../../../shared/types.ts'
+import type { Db } from '../../db/database.ts'
+import { BadRequestError } from '../../errors.ts'
+import type { TransactionStore } from '../index.ts'
 
 interface TxnRow {
   id: number
@@ -79,7 +82,7 @@ const DECIMAL_RE = /^\d+(\.\d+)?$/
 
 function validateDecimal(value: string, field: string): void {
   if (!DECIMAL_RE.test(value)) {
-    throw new Error(`Invalid decimal string for ${field}: ${value}`)
+    throw new BadRequestError(`Invalid decimal string for ${field}: ${value}`)
   }
 }
 
@@ -105,7 +108,9 @@ export function createTransactionStore(db: Db): TransactionStore {
     },
 
     getById(tenantId, id) {
-      const row = db.prepare('SELECT * FROM txn WHERE tenant_id = ? AND id = ?').get(tenantId, id) as TxnRow | undefined
+      const row = db
+        .prepare('SELECT * FROM txn WHERE tenant_id = ? AND id = ?')
+        .get(tenantId, id) as TxnRow | undefined
       return row ? toTransaction(row) : undefined
     },
 
@@ -114,7 +119,8 @@ export function createTransactionStore(db: Db): TransactionStore {
       if (body.unitPriceNative) validateDecimal(body.unitPriceNative, 'unitPriceNative')
       if (body.costsGbp) validateDecimal(body.costsGbp, 'costsGbp')
 
-      const result = db.prepare(`
+      const result = db
+        .prepare(`
         INSERT INTO txn (
           tenant_id, instrument_id, txn_type, txn_date, quantity,
           unit_price_native, native_currency,
@@ -127,32 +133,33 @@ export function createTransactionStore(db: Db): TransactionStore {
           split_ratio, capreturn_per_share_gbp,
           notes
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      `).run(
-        tenantId,
-        body.instrumentId,
-        body.txnType,
-        body.txnDate,
-        body.quantity,
-        body.unitPriceNative ?? null,
-        body.nativeCurrency ?? null,
-        body.fxRate ?? null,
-        body.fxRateType ?? null,
-        null, // fx_rate_source set by FxService after creation
-        body.costsGbp ?? '0',
-        body.incomeAmountGbp ?? null,
-        body.esppDiscountPriceNative ?? null,
-        null, // espp_discount_price_gbp derived by server after FX
-        body.rsuGrossSharesVested ?? null,
-        body.rsuSharesWithheld ?? null,
-        body.rsuWithholdingRate ?? null,
-        body.rsuWithholdingMethod ?? null,
-        body.dividendGrossGbp ?? null,
-        body.dividendWithholdingGbp ?? null,
-        body.dividendNetGbp ?? null,
-        body.splitRatio ?? null,
-        body.capreturnsPerShareGbp ?? null,
-        body.notes ?? null,
-      )
+      `)
+        .run(
+          tenantId,
+          body.instrumentId,
+          body.txnType,
+          body.txnDate,
+          body.quantity,
+          body.unitPriceNative ?? null,
+          body.nativeCurrency ?? null,
+          body.fxRate ?? null,
+          body.fxRateType ?? null,
+          null, // fx_rate_source set by FxService after creation
+          body.costsGbp ?? '0',
+          body.incomeAmountGbp ?? null,
+          body.esppDiscountPriceNative ?? null,
+          null, // espp_discount_price_gbp derived by server after FX
+          body.rsuGrossSharesVested ?? null,
+          body.rsuSharesWithheld ?? null,
+          body.rsuWithholdingRate ?? null,
+          body.rsuWithholdingMethod ?? null,
+          body.dividendGrossGbp ?? null,
+          body.dividendWithholdingGbp ?? null,
+          body.dividendNetGbp ?? null,
+          body.splitRatio ?? null,
+          body.capreturnsPerShareGbp ?? null,
+          body.notes ?? null,
+        )
       const id = Number(result.lastInsertRowid)
 
       db.prepare(`
@@ -193,7 +200,9 @@ export function createTransactionStore(db: Db): TransactionStore {
         body.txnType ?? existing.txnType,
         body.txnDate ?? existing.txnDate,
         body.quantity ?? existing.quantity,
-        body.unitPriceNative !== undefined ? (body.unitPriceNative ?? null) : existing.unitPriceNative,
+        body.unitPriceNative !== undefined
+          ? (body.unitPriceNative ?? null)
+          : existing.unitPriceNative,
         body.nativeCurrency !== undefined ? (body.nativeCurrency ?? null) : existing.nativeCurrency,
         body.fxRate !== undefined ? (body.fxRate ?? null) : existing.fxRate,
         body.fxRateType !== undefined ? (body.fxRateType ?? null) : existing.fxRateType,
@@ -202,18 +211,38 @@ export function createTransactionStore(db: Db): TransactionStore {
         body.totalGbp !== undefined ? (body.totalGbp ?? null) : existing.totalGbp,
         body.netGbp !== undefined ? (body.netGbp ?? null) : existing.netGbp,
         body.costsGbp ?? existing.costsGbp,
-        body.incomeAmountGbp !== undefined ? (body.incomeAmountGbp ?? null) : existing.incomeAmountGbp,
-        body.esppDiscountPriceNative !== undefined ? (body.esppDiscountPriceNative ?? null) : existing.esppDiscountPriceNative,
-        body.esppDiscountPriceGbp !== undefined ? (body.esppDiscountPriceGbp ?? null) : existing.esppDiscountPriceGbp,
-        body.rsuGrossSharesVested !== undefined ? (body.rsuGrossSharesVested ?? null) : existing.rsuGrossSharesVested,
-        body.rsuSharesWithheld !== undefined ? (body.rsuSharesWithheld ?? null) : existing.rsuSharesWithheld,
-        body.rsuWithholdingRate !== undefined ? (body.rsuWithholdingRate ?? null) : existing.rsuWithholdingRate,
-        body.rsuWithholdingMethod !== undefined ? (body.rsuWithholdingMethod ?? null) : existing.rsuWithholdingMethod,
-        body.dividendGrossGbp !== undefined ? (body.dividendGrossGbp ?? null) : existing.dividendGrossGbp,
-        body.dividendWithholdingGbp !== undefined ? (body.dividendWithholdingGbp ?? null) : existing.dividendWithholdingGbp,
+        body.incomeAmountGbp !== undefined
+          ? (body.incomeAmountGbp ?? null)
+          : existing.incomeAmountGbp,
+        body.esppDiscountPriceNative !== undefined
+          ? (body.esppDiscountPriceNative ?? null)
+          : existing.esppDiscountPriceNative,
+        body.esppDiscountPriceGbp !== undefined
+          ? (body.esppDiscountPriceGbp ?? null)
+          : existing.esppDiscountPriceGbp,
+        body.rsuGrossSharesVested !== undefined
+          ? (body.rsuGrossSharesVested ?? null)
+          : existing.rsuGrossSharesVested,
+        body.rsuSharesWithheld !== undefined
+          ? (body.rsuSharesWithheld ?? null)
+          : existing.rsuSharesWithheld,
+        body.rsuWithholdingRate !== undefined
+          ? (body.rsuWithholdingRate ?? null)
+          : existing.rsuWithholdingRate,
+        body.rsuWithholdingMethod !== undefined
+          ? (body.rsuWithholdingMethod ?? null)
+          : existing.rsuWithholdingMethod,
+        body.dividendGrossGbp !== undefined
+          ? (body.dividendGrossGbp ?? null)
+          : existing.dividendGrossGbp,
+        body.dividendWithholdingGbp !== undefined
+          ? (body.dividendWithholdingGbp ?? null)
+          : existing.dividendWithholdingGbp,
         body.dividendNetGbp !== undefined ? (body.dividendNetGbp ?? null) : existing.dividendNetGbp,
         body.splitRatio !== undefined ? (body.splitRatio ?? null) : existing.splitRatio,
-        body.capreturnsPerShareGbp !== undefined ? (body.capreturnsPerShareGbp ?? null) : existing.capreturnsPerShareGbp,
+        body.capreturnsPerShareGbp !== undefined
+          ? (body.capreturnsPerShareGbp ?? null)
+          : existing.capreturnsPerShareGbp,
         body.notes !== undefined ? (body.notes ?? null) : existing.notes,
         tenantId,
         id,

@@ -17,7 +17,7 @@ function toYahooSymbol(ticker: string, currency: string): string {
 }
 
 function toUnixTs(date: string): number {
-  return Math.floor(new Date(date + 'T00:00:00Z').getTime() / 1000)
+  return Math.floor(new Date(`${date}T00:00:00Z`).getTime() / 1000)
 }
 
 function toDateStr(unixTs: number): string {
@@ -53,8 +53,8 @@ function parseYahooChart(
   // Yahoo returns LSE prices in GBp (pence) regardless of how the instrument is stored.
   // If the caller expects GBP (pounds), divide by 100. If GBX (pence) is expected,
   // Yahoo's pence values are correct as-is.
-  const yahooCurrency = result.meta.currency  // e.g. "GBp", "USD", "EUR"
-  const divisor = (yahooCurrency === 'GBp' && requestedCurrency === 'GBP') ? 100 : 1
+  const yahooCurrency = result.meta.currency // e.g. "GBp", "USD", "EUR"
+  const divisor = yahooCurrency === 'GBp' && requestedCurrency === 'GBP' ? 100 : 1
 
   const out: { date: string; close: number }[] = []
   for (let i = 0; i < timestamps.length; i++) {
@@ -77,10 +77,10 @@ export function createYahooProvider(): PriceProvider {
 
       const res = await fetch(url, { headers: HEADERS })
       if (!res.ok) throw new Error(`Yahoo Finance HTTP ${res.status}`)
-      const data = await res.json() as YahooChartResponse
+      const data = (await res.json()) as YahooChartResponse
 
       const prices = parseYahooChart(data, currency)
-      const match = prices.find(p => p.date === date)
+      const match = prices.find((p) => p.date === date)
       if (!match) return null
 
       return { priceDate: match.date, closePrice: String(match.close), source: 'yahoo' }
@@ -94,11 +94,11 @@ export function createYahooProvider(): PriceProvider {
 
       const res = await fetch(url, { headers: HEADERS })
       if (!res.ok) throw new Error(`Yahoo Finance HTTP ${res.status}`)
-      const data = await res.json() as YahooChartResponse
+      const data = (await res.json()) as YahooChartResponse
 
       return parseYahooChart(data, currency)
-        .filter(p => p.date >= from && p.date <= to)
-        .map(p => ({ priceDate: p.date, closePrice: String(p.close), source: 'yahoo' }))
+        .filter((p) => p.date >= from && p.date <= to)
+        .map((p) => ({ priceDate: p.date, closePrice: String(p.close), source: 'yahoo' }))
     },
   }
 }

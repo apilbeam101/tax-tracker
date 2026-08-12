@@ -1,6 +1,6 @@
+import type { Price } from '../../../shared/types.ts'
 import type { Db } from '../../db/database.ts'
 import type { PriceStore } from '../index.ts'
-import type { Price } from '../../../shared/types.ts'
 
 interface PriceRow {
   id: number
@@ -25,16 +25,16 @@ function toPrice(row: PriceRow): Price {
 export function createPriceStore(db: Db): PriceStore {
   return {
     get(instrumentId, priceDate) {
-      const row = db.prepare(
-        'SELECT * FROM price WHERE instrument_id = ? AND price_date = ?'
-      ).get(instrumentId, priceDate) as PriceRow | undefined
+      const row = db
+        .prepare('SELECT * FROM price WHERE instrument_id = ? AND price_date = ?')
+        .get(instrumentId, priceDate) as PriceRow | undefined
       return row ? toPrice(row) : undefined
     },
 
     getLatest(instrumentId) {
-      const row = db.prepare(
-        'SELECT * FROM price WHERE instrument_id = ? ORDER BY price_date DESC LIMIT 1'
-      ).get(instrumentId) as PriceRow | undefined
+      const row = db
+        .prepare('SELECT * FROM price WHERE instrument_id = ? ORDER BY price_date DESC LIMIT 1')
+        .get(instrumentId) as PriceRow | undefined
       return row ? toPrice(row) : undefined
     },
 

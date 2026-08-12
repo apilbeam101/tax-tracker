@@ -489,6 +489,10 @@ exports are lossless (no data is dropped in translation).
 | Secrets | All sensitive config (session secret, encryption key, API keys) in `.env`, never committed. |
 | HTTP headers | `@fastify/helmet` sets `Content-Security-Policy`, `HSTS`, `X-Content-Type-Options`, `Referrer-Policy`. |
 | Auth errors | Generic message for login failures (no username enumeration). |
+| Error responses | Centralized handler (`src/server/errors.ts`) — a plain thrown `Error` never reaches the client with its real message (e.g. a raw SQLite constraint error); only a recognized `HttpError` subclass, a schema-validation error, or a plugin-classified 4xx (rate limit, CSRF) surfaces its actual message. |
+| Log redaction | `src/server/config/logging.ts` scrubs cookies, auth headers, API keys, and secret fields from Pino output before it hits stdout. |
+| Secret scanning | gitleaks in CI on every push/PR plus a monthly full-history scan (`.github/workflows/secrets.yml`) — catches an accidentally-committed secret before/soon after it lands. |
+| Dependency auditing | `npm audit --omit=dev --audit-level=high` in CI; Dependabot opens grouped update PRs monthly. |
 
 **Important for self-hosters:** if you expose the service on a public IP or domain, you
 **must** use HTTPS (set `NODE_ENV=production` and front with a reverse proxy such as
@@ -513,7 +517,11 @@ without a rewrite:
    not changing handlers.
 4. **Versioned migrations** from commit #1, auto-run on startup.
 5. **Config via `.env`.** DB path, bind address, keys — all injectable so the same binary
-   runs single-user on localhost or multi-tenant in a container.
+   runs single-user on localhost or multi-tenant in a container. `Dockerfile` +
+   `deploy/docker-compose.yml` now provide that container path as an additional
+   self-hosting option (non-root UID, `read_only` filesystem, bind-mounted SQLite data
+   directory) alongside the bare-Node/reverse-proxy setup — see the README's "Docker"
+   section.
 
 ---
 
@@ -552,8 +560,10 @@ claude-tax/
 │   ├── server/
 │   │   ├── main.ts           Entry point
 │   │   ├── app.ts            Fastify plugin registration
+│   │   ├── errors.ts         HttpError taxonomy + global setErrorHandler
 │   │   ├── config/
-│   │   │   └── env.ts        Typed config from .env
+│   │   │   ├── env.ts        Typed, validated config from .env
+│   │   │   └── logging.ts    Pino redact config + loggerOptions()
 │   │   ├── db/
 │   │   │   ├── database.ts   initDb(), migration runner
 │   │   │   └── migrations/   001_core_schema.sql … 005_vest_schedule_espp_discount.sql
@@ -594,8 +604,60 @@ claude-tax/
 │   └── shared/               Types shared between server and client
 ├── dist/                     Build output (gitignored)
 ├── data/                     SQLite DB file (gitignored)
+├── deploy/
+│   └── docker-compose.yml    Additional self-hosting option (see README "Docker")
+├── .github/
+│   ├── workflows/            ci.yml (lint/typecheck/test/build/audit), secrets.yml (gitleaks)
+│   └── dependabot.yml        Monthly npm + github-actions updates
 ├── .env.example              Template; copy to .env and fill in
+├── biome.json                Lint + format config (not ESLint — see §12)
+├── Dockerfile                Multi-stage build; additional self-hosting option
+├── .dockerignore
+├── CHANGELOG.md              Keep a Changelog format
 ├── DESIGN.md                 This document
 ├── IMPLEMENTATION.md         Phased build plan
 └── package.json
 ```
+
+## 12. Repository hygiene, CI, and packaging
+
+Added after v1's initial feature-complete state, informed by lessons from a sibling
+project's more mature CI/security setup.
+
+**Linting is Biome, not ESLint.** `typescript-eslint` (the natural ESLint choice for a
+TypeScript project) only supports TypeScript `<6.1.0` as a peer dependency; this project
+runs TypeScript `^7`. Rather than force an unverified/unsupported combination onto a
+financial-calculation codebase, linting moved to Biome, which has no such constraint and
+also handles formatting in the same tool. Biome cannot parse `.svelte` templates, so the
+client has no linter or type checker wired up (`tsconfig.json` excludes `src/client`) —
+`svelte-check` would close that gap if it's ever worth the effort.
+
+**CI** (`.github/workflows/ci.yml`) runs lint, typecheck, test, and build on every
+push/PR, plus a separate `npm audit --omit=dev --audit-level=high` job so a dev-only
+advisory doesn't block merges. Single Ubuntu/Node-24 job — no OS/Node matrix, since this
+is a self-hosted personal app, not a package or image consumed by third parties across
+platforms.
+
+**Secret scanning** (`.github/workflows/secrets.yml`, `.gitleaks.toml`) runs gitleaks on
+every push/PR against the diff range, plus a monthly full-history scan — the on-push mode
+alone cannot see further back than the pushed commit range, so the periodic full scan is
+what actually guarantees full-history coverage.
+
+**Error handling and logging** (§8) were hardened at the same time: a centralized error
+handler prevents an unclassified exception from leaking internal detail, and Pino log
+redaction prevents cookies/secrets from landing in stdout.
+
+**Testing:** the price/FX external-API parsers (Tiingo, HMRC monthly CSV, Frankfurter)
+gained fixture-based tests against realistic (synthetic but format-accurate) captured
+response shapes — previously thin or entirely untested despite being the layer most
+exposed to upstream format drift. Routes, auth, most repositories, and the Svelte client
+remain untested; this was a deliberately scoped addition, not a general coverage push.
+
+**Docker packaging** is additive, not a replacement for the bare-Node/reverse-proxy setup.
+Non-root fixed UID, `read_only` root filesystem with a `tmpfs`-backed `/tmp` (SQLite spills
+temp b-trees to disk on large queries even under `PRAGMA temp_store = MEMORY`'s intent to
+avoid it — belt and suspenders) and a bind-mounted `/app/data`, `init: true` for correct
+SIGTERM handling (a plain Node process as container PID 1 ignores SIGTERM outright), and
+the published port bound to `127.0.0.1` only — same "always behind a reverse proxy"
+posture as the non-Docker deployment. See the README's "Docker" section for the mandatory
+pre-flight steps (real secrets, `chown` on the bind-mounted host data directory).

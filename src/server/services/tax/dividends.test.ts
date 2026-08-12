@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest'
 import Big from 'big.js'
+import { describe, expect, it } from 'vitest'
+import type { TaxYearConfig, Transaction } from '../../../shared/types.ts'
 import { computeDividendTax } from './dividends.ts'
-import type { Transaction, TaxYearConfig } from '../../../shared/types.ts'
 
 function makeConfig(overrides: Partial<TaxYearConfig> = {}): TaxYearConfig {
   return {

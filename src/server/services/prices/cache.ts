@@ -1,6 +1,6 @@
+import type { Price } from '../../../shared/types.ts'
 import type { PriceStore } from '../../repositories/index.ts'
 import type { PriceProvider } from './provider.ts'
-import type { Price } from '../../../shared/types.ts'
 
 export interface PriceService {
   /**
@@ -8,13 +8,24 @@ export interface PriceService {
    * Checks the local cache first; falls back to the configured provider chain.
    * Returns null if no price can be obtained (e.g. market closed, ticker unknown).
    */
-  getPrice(instrumentId: number, ticker: string, currency: string, date: string): Promise<Price | null>
+  getPrice(
+    instrumentId: number,
+    ticker: string,
+    currency: string,
+    date: string,
+  ): Promise<Price | null>
 
   /**
    * Fetch and cache a range of historical prices for an instrument.
    * Useful for bulk backfill — calls the first provider that returns data.
    */
-  fetchRange(instrumentId: number, ticker: string, currency: string, from: string, to: string): Promise<Price[]>
+  fetchRange(
+    instrumentId: number,
+    ticker: string,
+    currency: string,
+    from: string,
+    to: string,
+  ): Promise<Price[]>
 
   /**
    * Return the most recent cached price for an instrument (latest date in the price table).
@@ -24,7 +35,7 @@ export interface PriceService {
 }
 
 function subtractDays(date: string, n: number): string {
-  const d = new Date(date + 'T00:00:00Z')
+  const d = new Date(`${date}T00:00:00Z`)
   d.setUTCDate(d.getUTCDate() - n)
   return d.toISOString().slice(0, 10)
 }
@@ -61,7 +72,7 @@ export function createPriceService(store: PriceStore, providers: PriceProvider[]
         try {
           const results = await provider.getHistoricalPrices(ticker, currency, from, to)
           if (results.length > 0) {
-            return results.map(r => store.upsert({ instrumentId, ...r }))
+            return results.map((r) => store.upsert({ instrumentId, ...r }))
           }
         } catch {
           // Provider failed; try the next one

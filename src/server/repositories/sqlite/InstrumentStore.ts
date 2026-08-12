@@ -1,9 +1,6 @@
+import type { Instrument, InstrumentType, RsuWithholdingMethod } from '../../../shared/types.ts'
 import type { Db } from '../../db/database.ts'
 import type { InstrumentStore } from '../index.ts'
-import type {
-  Instrument, InstrumentType, RsuWithholdingMethod,
-  CreateInstrumentBody, UpdateInstrumentBody,
-} from '../../../shared/types.ts'
 
 interface InstrumentRow {
   id: number
@@ -40,36 +37,45 @@ function toInstrument(row: InstrumentRow): Instrument {
 export function createInstrumentStore(db: Db): InstrumentStore {
   return {
     list(tenantId) {
-      return (db.prepare('SELECT * FROM instrument WHERE tenant_id = ? ORDER BY ticker').all(tenantId) as unknown as InstrumentRow[])
-        .map(toInstrument)
+      return (
+        db
+          .prepare('SELECT * FROM instrument WHERE tenant_id = ? ORDER BY ticker')
+          .all(tenantId) as unknown as InstrumentRow[]
+      ).map(toInstrument)
     },
 
     getById(tenantId, id) {
-      const row = db.prepare('SELECT * FROM instrument WHERE tenant_id = ? AND id = ?').get(tenantId, id) as InstrumentRow | undefined
+      const row = db
+        .prepare('SELECT * FROM instrument WHERE tenant_id = ? AND id = ?')
+        .get(tenantId, id) as InstrumentRow | undefined
       return row ? toInstrument(row) : undefined
     },
 
     getByTicker(tenantId, ticker) {
-      const row = db.prepare('SELECT * FROM instrument WHERE tenant_id = ? AND ticker = ?').get(tenantId, ticker) as InstrumentRow | undefined
+      const row = db
+        .prepare('SELECT * FROM instrument WHERE tenant_id = ? AND ticker = ?')
+        .get(tenantId, ticker) as InstrumentRow | undefined
       return row ? toInstrument(row) : undefined
     },
 
     create(tenantId, body, userId) {
-      const result = db.prepare(`
+      const result = db
+        .prepare(`
         INSERT INTO instrument (tenant_id, ticker, isin, name, currency, exchange, instrument_type, is_employer_stock, rsu_withholding_method, notes)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        tenantId,
-        body.ticker,
-        body.isin ?? null,
-        body.name,
-        body.currency,
-        body.exchange ?? null,
-        body.instrumentType ?? 'equity',
-        body.isEmployerStock ? 1 : 0,
-        body.rsuWithholdingMethod ?? 'net-settlement',
-        body.notes ?? null,
-      )
+      `)
+        .run(
+          tenantId,
+          body.ticker,
+          body.isin ?? null,
+          body.name,
+          body.currency,
+          body.exchange ?? null,
+          body.instrumentType ?? 'equity',
+          body.isEmployerStock ? 1 : 0,
+          body.rsuWithholdingMethod ?? 'net-settlement',
+          body.notes ?? null,
+        )
       const id = Number(result.lastInsertRowid)
       db.prepare(`
         INSERT INTO audit_log (tenant_id, user_id, action, entity_type, entity_id, new_data)
@@ -89,14 +95,20 @@ export function createInstrumentStore(db: Db): InstrumentStore {
         WHERE tenant_id = ? AND id = ?
       `).run(
         body.ticker ?? existing.ticker,
-        body.isin !== undefined ? body.isin ?? null : existing.isin,
+        body.isin !== undefined ? (body.isin ?? null) : existing.isin,
         body.name ?? existing.name,
         body.currency ?? existing.currency,
-        body.exchange !== undefined ? body.exchange ?? null : existing.exchange,
+        body.exchange !== undefined ? (body.exchange ?? null) : existing.exchange,
         body.instrumentType ?? existing.instrumentType,
-        body.isEmployerStock !== undefined ? (body.isEmployerStock ? 1 : 0) : (existing.isEmployerStock ? 1 : 0),
+        body.isEmployerStock !== undefined
+          ? body.isEmployerStock
+            ? 1
+            : 0
+          : existing.isEmployerStock
+            ? 1
+            : 0,
         body.rsuWithholdingMethod ?? existing.rsuWithholdingMethod,
-        body.notes !== undefined ? body.notes ?? null : existing.notes,
+        body.notes !== undefined ? (body.notes ?? null) : existing.notes,
         tenantId,
         id,
       )

@@ -92,6 +92,31 @@ After setup, log in with the username and password you created.
 
 ---
 
+## Docker (alternative to steps 3-4 above)
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and fill in **real, generated** `SESSION_SECRET`/`ENCRYPTION_KEY` values (step 2 above) — the placeholders in `.env.example` are non-empty strings that pass validation, so the app will start happily with a publicly-known secret if you skip this.
+
+The container runs as a fixed non-root UID (`10001`), and its SQLite data lives in a directory bind-mounted from the host (`./data`) so it survives a container recreate. That host directory needs to already be owned by that UID before the first run — Docker does not do this for you on a bind mount:
+
+```bash
+mkdir -p data
+sudo chown -R 10001:10001 data
+```
+
+Then build and start:
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d --build
+```
+
+The published port is bound to `127.0.0.1` only, same as the non-Docker setup — put it behind a reverse proxy (see [Reverse proxy (HTTPS)](#reverse-proxy-https) below) rather than exposing it directly. `npm run backup` on the host still works unmodified against `data/taxtracker.db`, since the container's `DB_PATH` maps to the same relative path.
+
+---
+
 ## Optional: Live prices (Tiingo)
 
 1. Sign up for a free account at [tiingo.com](https://www.tiingo.com)
@@ -193,7 +218,7 @@ npm run dev          # Dev server with hot-reload (tsx watch)
 npm run build        # Full build: Svelte SPA then TypeScript server
 npm test             # Run all tests once
 npm run test:watch   # Vitest watch mode
-npm run lint         # ESLint over src/**/*.{ts,svelte}
+npm run lint         # Biome check (lint + format check)
 npm run backup       # Timestamped DB backup to data/backups/
 ```
 

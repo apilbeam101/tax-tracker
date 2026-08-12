@@ -17,9 +17,14 @@
  */
 import Big from 'big.js'
 
-function bigMin(a: Big, b: Big): Big { return a.lt(b) ? a : b }
-function bigMax(a: Big, b: Big): Big { return a.gt(b) ? a : b }
-import type { Transaction, TaxYearConfig } from '../../../shared/types.ts'
+function bigMin(a: Big, b: Big): Big {
+  return a.lt(b) ? a : b
+}
+function bigMax(a: Big, b: Big): Big {
+  return a.gt(b) ? a : b
+}
+
+import type { TaxYearConfig, Transaction } from '../../../shared/types.ts'
 
 export interface DividendTaxResult {
   txnId: number

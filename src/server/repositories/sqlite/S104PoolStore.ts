@@ -14,9 +14,11 @@ interface PoolRow {
 export function createS104PoolStore(db: Db): S104PoolStore {
   return {
     get(tenantId, instrumentId) {
-      const row = db.prepare(
-        'SELECT pool_quantity, pool_cost_gbp FROM s104_pool WHERE tenant_id = ? AND instrument_id = ?'
-      ).get(tenantId, instrumentId) as PoolRow | undefined
+      const row = db
+        .prepare(
+          'SELECT pool_quantity, pool_cost_gbp FROM s104_pool WHERE tenant_id = ? AND instrument_id = ?',
+        )
+        .get(tenantId, instrumentId) as PoolRow | undefined
 
       if (!row) return { quantity: '0', costGbp: '0' }
       return { quantity: row.pool_quantity, costGbp: row.pool_cost_gbp }
