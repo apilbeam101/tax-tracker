@@ -90,7 +90,12 @@
 
   async function remove(id: number) {
     if (!confirm('Delete this scheduled event?')) return
-    await apiFetch(`/api/projections/${id}`, { method: 'DELETE' })
+    const res = await apiFetch(`/api/projections/${id}`, { method: 'DELETE' })
+    if (!res.ok) {
+      error = 'Failed to delete — please try again.'
+      return
+    }
+    error = ''
     await loadEvents()
   }
 
@@ -285,33 +290,33 @@
 <style>
   h2 { margin-top: 0; }
   .toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
-  .empty { color: #6c757d; }
-  .hint { color: #6c757d; font-size: .8rem; margin: .25rem 0 1rem; }
-  .hint-inline { color: #6c757d; font-size: .8rem; }
+  .empty { color: var(--text-muted); }
+  .hint { color: var(--text-muted); font-size: .8rem; margin: .25rem 0 1rem; }
+  .hint-inline { color: var(--text-muted); font-size: .8rem; }
 
   .group-header {
     display: flex; align-items: baseline; justify-content: space-between;
-    font-weight: 600; font-size: .9rem; color: #495057;
+    font-weight: 600; font-size: .9rem; color: var(--text-secondary);
     margin: 1.5rem 0 .5rem; padding-bottom: .4rem;
-    border-bottom: 2px solid #dee2e6;
+    border-bottom: 2px solid var(--border);
   }
-  .group-total { font-weight: 400; color: #0d6efd; font-size: .875rem; }
+  .group-total { font-weight: 400; color: var(--accent); font-size: .875rem; }
 
   .table-wrap { overflow-x: auto; margin-bottom: 1rem; }
   table { width: 100%; border-collapse: collapse; font-size: .875rem; }
-  th, td { padding: .5rem .75rem; text-align: left; border-bottom: 1px solid #dee2e6; white-space: nowrap; }
-  th { font-weight: 600; color: #495057; background: #f8f9fa; }
+  th, td { padding: .5rem .75rem; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { font-weight: 600; color: var(--text-secondary); background: var(--bg); }
   .num { text-align: right; }
 
-  .badge { display: inline-block; padding: .125rem .4rem; border-radius: 3px; font-size: .75rem; font-weight: 600; background: #e9ecef; color: #495057; }
-  .badge-rsu-vest { background: #d1ecf1; color: #0c5460; }
-  .badge-espp-purchase { background: #d4edda; color: #155724; }
-  .badge-option-expiry { background: #fff3cd; color: #856404; }
+  .badge { display: inline-block; padding: .125rem .4rem; border-radius: 3px; font-size: .75rem; font-weight: 600; background: var(--surface-alt); color: var(--text-secondary); }
+  .badge-rsu-vest { background: var(--info-bg); color: var(--info-text); }
+  .badge-espp-purchase { background: var(--success-bg); color: var(--success-text); }
+  .badge-option-expiry { background: var(--warning-bg); color: var(--warning-text); }
 
   .actions { display: flex; gap: .5rem; }
-  .btn-link { background: none; border: none; color: #0d6efd; cursor: pointer; padding: 0; font-size: inherit; }
-  .btn-link.danger { color: #dc3545; }
-  .btn-primary { background: #0d6efd; color: white; border: none; padding: .5rem 1rem; border-radius: 4px; cursor: pointer; font-size: .9rem; }
+  .btn-link { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0; font-size: inherit; }
+  .btn-link.danger { color: var(--danger); }
+  .btn-primary { background: var(--accent); color: var(--on-accent); border: none; padding: .5rem 1rem; border-radius: 4px; cursor: pointer; font-size: .9rem; }
   button:disabled { opacity: .65; cursor: not-allowed; }
 
   .form-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
@@ -319,7 +324,7 @@
   .row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
   label { display: flex; flex-direction: column; gap: .25rem; font-weight: 500; font-size: .9rem; flex: 1; min-width: 140px; }
   label.wide { flex: 2; }
-  input, select { padding: .4rem .6rem; border: 1px solid #ced4da; border-radius: 4px; font-size: .9rem; }
+  input, select { padding: .4rem .6rem; border: 1px solid var(--border-strong); border-radius: 4px; font-size: .9rem; background: var(--surface); color: var(--text); }
   .form-actions { display: flex; gap: .75rem; }
-  .error { background: #f8d7da; border: 1px solid #f5c2c7; border-radius: 4px; padding: .75rem; margin-bottom: 1rem; font-size: .875rem; }
+  .error { background: var(--danger-bg); border: 1px solid var(--danger-bg-alt); color: var(--danger-text); border-radius: 4px; padding: .75rem; margin-bottom: 1rem; font-size: .875rem; }
 </style>

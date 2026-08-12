@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { cssVar, resolveColor } from './cssVar.ts'
+  import { themeStore } from './theme.svelte.ts'
 
   interface Point { date: string; value: string }
 
   let {
     points = [],
-    color = '#0d6efd',
-    negativeColor = '#dc3545',
+    color = 'var(--accent)',
+    negativeColor = 'var(--danger)',
     height = 200,
     formatY = (v: number) => `£${v.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
   }: {
@@ -50,7 +52,7 @@
     const zeroY = py(0)
 
     // Grid lines (5 horizontal)
-    ctx.strokeStyle = '#e9ecef'
+    ctx.strokeStyle = cssVar('--border')
     ctx.lineWidth = 1
     for (let i = 0; i <= 4; i++) {
       const y = PAD.top + (i / 4) * chartH
@@ -59,7 +61,7 @@
       ctx.lineTo(PAD.left + chartW, y)
       ctx.stroke()
       const v = maxV - (i / 4) * range
-      ctx.fillStyle = '#6c757d'
+      ctx.fillStyle = cssVar('--text-muted')
       ctx.font = '11px system-ui, sans-serif'
       ctx.textAlign = 'right'
       ctx.fillText(formatY(v), PAD.left - 6, y + 4)
@@ -67,7 +69,7 @@
 
     // Zero line (bold if there are negatives)
     if (minV < 0) {
-      ctx.strokeStyle = '#adb5bd'
+      ctx.strokeStyle = cssVar('--text-faint')
       ctx.lineWidth = 1.5
       ctx.beginPath()
       ctx.moveTo(PAD.left, zeroY)
@@ -78,6 +80,8 @@
     // Bars
     const gap = 2
     const barW = Math.max(2, chartW / points.length - gap)
+    const barColor = resolveColor(color, '#0d6efd')
+    const barNegativeColor = resolveColor(negativeColor, '#dc3545')
     for (let i = 0; i < points.length; i++) {
       const v = values[i]
       const x = PAD.left + (i / points.length) * chartW + gap / 2
@@ -85,14 +89,14 @@
       const barBottom = v >= 0 ? zeroY : py(v)
       const barH = Math.abs(barBottom - barTop)
 
-      ctx.fillStyle = v >= 0 ? color : negativeColor
+      ctx.fillStyle = v >= 0 ? barColor : barNegativeColor
       ctx.fillRect(x, barTop, barW, barH || 1)
     }
 
     // X labels (~5)
     const labelCount = Math.min(5, points.length)
     const step = Math.floor((points.length - 1) / Math.max(1, labelCount - 1)) || 1
-    ctx.fillStyle = '#6c757d'
+    ctx.fillStyle = cssVar('--text-muted')
     ctx.font = '10px system-ui, sans-serif'
     ctx.textAlign = 'center'
     for (let i = 0; i < points.length; i += step) {
@@ -110,6 +114,7 @@
 
   $effect(() => {
     points
+    themeStore.theme
     draw()
   })
 </script>
@@ -125,5 +130,5 @@
 <style>
   .chart-wrap { position: relative; width: 100%; }
   canvas { display: block; }
-  .empty { display: flex; align-items: center; justify-content: center; height: 120px; color: #6c757d; font-size: .875rem; }
+  .empty { display: flex; align-items: center; justify-content: center; height: 120px; color: var(--text-muted); font-size: .875rem; }
 </style>

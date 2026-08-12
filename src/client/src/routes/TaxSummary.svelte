@@ -38,6 +38,7 @@
 
   interface DividendTaxResult {
     txnId: number
+    txnDate: string
     taxYear: string
     grossGbp: string
     withholdingGbp: string
@@ -63,6 +64,7 @@
 
   interface EsppPurchaseIncome {
     txnId: number
+    txnDate: string
     taxYear: string
     quantity: string
     mvAtPurchaseGbp: string
@@ -409,7 +411,7 @@
           <table class="disposals">
             <thead>
               <tr>
-                <th>Txn ID</th>
+                <th>Date</th>
                 <th>Gross (GBP)</th>
                 <th>Withholding</th>
                 <th>FTCR</th>
@@ -420,7 +422,7 @@
             <tbody>
               {#each dividendItems as d}
                 <tr>
-                  <td class="muted-sm">#{d.txnId}</td>
+                  <td class="muted-sm">{d.txnDate}</td>
                   <td class="right">{gbp(d.grossGbp)}</td>
                   <td class="right">{gbp(d.withholdingGbp)}</td>
                   <td class="right gain">{gbp(d.ftcr)}</td>
@@ -500,7 +502,7 @@
           <table class="disposals">
             <thead>
               <tr>
-                <th>Txn ID</th>
+                <th>Date</th>
                 <th>Qty</th>
                 <th>MV/share</th>
                 <th>Price paid/share</th>
@@ -512,7 +514,7 @@
             <tbody>
               {#each esppItems as e}
                 <tr>
-                  <td class="muted-sm">#{e.txnId}</td>
+                  <td class="muted-sm">{e.txnDate}</td>
                   <td class="right">{maskedStore.masked ? '••••' : parseFloat(e.quantity).toLocaleString('en-GB', { maximumFractionDigits: 4 })}</td>
                   <td class="right">{gbp(e.mvAtPurchaseGbp)}</td>
                   <td class="right">{gbp(e.pricePaidGbp)}</td>
@@ -575,14 +577,14 @@
   .toolbar h2 { margin: 0; }
   .controls { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
   label { display: flex; flex-direction: column; gap: .25rem; font-size: .85rem; font-weight: 600; }
-  label select, label input { font-size: 1rem; padding: .35rem .5rem; border: 1px solid #dee2e6; border-radius: 4px; }
+  label select, label input { font-size: 1rem; padding: .35rem .5rem; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text); }
   label input { width: 120px; }
-  .btn-primary { background: #1a1a2e; color: white; border: none; padding: .5rem 1rem; border-radius: 4px; cursor: pointer; font-size: .9rem; }
+  .btn-primary { background: var(--nav-bg); color: var(--nav-text); border: none; padding: .5rem 1rem; border-radius: 4px; cursor: pointer; font-size: .9rem; }
   .btn-primary:disabled { opacity: .6; cursor: not-allowed; }
 
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
-  .card { background: white; border: 1px solid #dee2e6; border-radius: 6px; padding: 1rem; }
-  .card-label { font-size: .78rem; color: #6c757d; margin-bottom: .25rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; }
+  .card-label { font-size: .78rem; color: var(--text-muted); margin-bottom: .25rem; }
   .card-value { font-size: 1.25rem; font-weight: 700; }
 
   /* Tax band selector */
@@ -590,52 +592,52 @@
   .band-label { font-size: .85rem; font-weight: 600; }
   .band-pills { display: flex; gap: .3rem; }
   .band-pill {
-    background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px;
-    padding: .25rem .6rem; font-size: .8rem; cursor: pointer; color: #495057;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    padding: .25rem .6rem; font-size: .8rem; cursor: pointer; color: var(--text-secondary);
   }
-  .band-pill.active { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
-  .band-pill:hover:not(.active) { background: #e9ecef; }
-  .income-hint { font-size: .85rem; color: #6c757d; padding: .35rem 0; align-self: flex-end; }
+  .band-pill.active { background: var(--nav-bg); color: var(--nav-text); border-color: var(--nav-bg); }
+  .band-pill:hover:not(.active) { background: var(--surface-alt); }
+  .income-hint { font-size: .85rem; color: var(--text-muted); padding: .35rem 0; align-self: flex-end; }
 
-  .gain { color: #198754; }
-  .loss { color: #dc3545; }
+  .gain { color: var(--success); }
+  .loss { color: var(--danger); }
 
-  .alert { background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; padding: .75rem 1rem; margin-bottom: 1.5rem; font-size: .9rem; }
-  .error { color: #dc3545; margin-bottom: 1rem; }
-  .muted { color: #6c757d; }
-  .muted-sm { color: #6c757d; font-size: .8rem; }
-  .hint { color: #6c757d; font-size: .85rem; margin: .5rem 0 1rem; line-height: 1.5; }
+  .alert { background: var(--warning-bg); border: 1px solid var(--warning); border-radius: 6px; padding: .75rem 1rem; margin-bottom: 1.5rem; font-size: .9rem; }
+  .error { color: var(--danger); margin-bottom: 1rem; }
+  .muted { color: var(--text-muted); }
+  .muted-sm { color: var(--text-muted); font-size: .8rem; }
+  .hint { color: var(--text-muted); font-size: .85rem; margin: .5rem 0 1rem; line-height: 1.5; }
 
   /* Section headers */
-  .section-header { display: flex; align-items: baseline; gap: 1rem; margin-top: 2.5rem; margin-bottom: 1rem; border-bottom: 2px solid #dee2e6; padding-bottom: .5rem; }
+  .section-header { display: flex; align-items: baseline; gap: 1rem; margin-top: 2.5rem; margin-bottom: 1rem; border-bottom: 2px solid var(--border); padding-bottom: .5rem; }
   .section-header h3 { margin: 0; font-size: 1.1rem; }
   .section-header.mt { margin-top: 3rem; }
-  .section-sub { font-size: .8rem; color: #6c757d; }
+  .section-sub { font-size: .8rem; color: var(--text-muted); }
 
   .section { margin-top: 1.5rem; }
-  .section h4 { margin-top: 0; margin-bottom: .75rem; font-size: .95rem; color: #343a40; }
+  .section h4 { margin-top: 0; margin-bottom: .75rem; font-size: .95rem; color: var(--text-secondary); }
 
   table { width: 100%; border-collapse: collapse; font-size: .9rem; }
-  th, td { padding: .5rem .75rem; text-align: left; border-bottom: 1px solid #dee2e6; }
-  th { background: #f8f9fa; font-weight: 600; }
+  th, td { padding: .5rem .75rem; text-align: left; border-bottom: 1px solid var(--border); }
+  th { background: var(--bg); font-weight: 600; }
   .right { text-align: right; }
-  tr.highlight td { background: #f8f9fa; font-weight: 600; }
+  tr.highlight td { background: var(--bg); font-weight: 600; }
 
   .badge { font-size: .75rem; padding: .2rem .5rem; border-radius: 4px; white-space: nowrap; }
-  .badge-same-day { background: #cff4fc; color: #055160; }
-  .badge-30-day { background: #fff3cd; color: #664d03; }
-  .badge-s104-pool { background: #e2e3e5; color: #41464b; }
-  .badge-band-nil { background: #e2e3e5; color: #41464b; }
-  .badge-band-basic { background: #d1ecf1; color: #0c5460; }
-  .badge-band-higher { background: #fff3cd; color: #664d03; }
-  .badge-band-additional { background: #f8d7da; color: #842029; }
-  .badge-projected { background: #e8d5f7; color: #5a1d8a; }
+  .badge-same-day { background: var(--info-bg-alt); color: var(--info-text-alt); }
+  .badge-30-day { background: var(--warning-bg); color: var(--warning-text-alt); }
+  .badge-s104-pool { background: var(--neutral-bg); color: var(--neutral-text); }
+  .badge-band-nil { background: var(--neutral-bg); color: var(--neutral-text); }
+  .badge-band-basic { background: var(--info-bg); color: var(--info-text); }
+  .badge-band-higher { background: var(--warning-bg); color: var(--warning-text-alt); }
+  .badge-band-additional { background: var(--danger-bg); color: var(--danger-text-alt); }
+  .badge-projected { background: var(--projected-bg); color: var(--projected-text-alt); }
 
-  .alert-info { background: #e8f4fd; border: 1px solid #90caf9; border-radius: 6px; padding: .75rem 1rem; margin-bottom: 1.5rem; font-size: .9rem; color: #1a4f72; }
+  .alert-info { background: var(--info-bg-alt); border: 1px solid var(--info-border); border-radius: 6px; padding: .75rem 1rem; margin-bottom: 1.5rem; font-size: .9rem; color: var(--info-text-alt); }
 
-  .card-projected { border-style: dashed; border-color: #a78bfa; background: #faf5ff; }
-  .card-projected .card-label { color: #7c3aed; }
-  .card-projected .card-value { color: #5b21b6; }
+  .card-projected { border-style: dashed; border-color: var(--projected-border); background: var(--projected-bg-alt); }
+  .card-projected .card-label { color: var(--projected-accent); }
+  .card-projected .card-value { color: var(--projected-text); }
 
-  .projected-row td { background: #faf5ff; color: #5b21b6; font-style: italic; }
+  .projected-row td { background: var(--projected-bg-alt); color: var(--projected-text); font-style: italic; }
 </style>

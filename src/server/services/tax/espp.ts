@@ -14,6 +14,7 @@ import type { Transaction } from '../../../shared/types.ts'
 
 export interface EsppPurchaseIncome {
   txnId: number
+  txnDate: string
   taxYear: string
   quantity: string
   mvAtPurchaseGbp: string
@@ -45,6 +46,7 @@ export function computeEsppPurchaseIncome(
 
   return {
     txnId: txn.id,
+    txnDate: txn.txnDate,
     taxYear,
     quantity: txn.quantity,
     mvAtPurchaseGbp: mvPerShare.toFixed(8),

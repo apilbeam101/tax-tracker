@@ -25,6 +25,7 @@ import { buildCgtSummary } from '../services/tax/cgt_summary.ts'
 import { computeDividendTax } from '../services/tax/dividends.ts'
 import { taxYearForDate } from '../services/tax/matching.ts'
 import { linkRealisedProjection, recalcInstrument } from '../services/tax/recalc.ts'
+import { applyAutoWithholding } from '../services/tax/withholding.ts'
 
 // Shared helper used in transactions route — duplicated here to avoid coupling
 async function computeAndPersistGbpFields(
@@ -278,6 +279,7 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
             body.quantity,
             txn.id,
           )
+          applyAutoWithholding(user.tenantId, txn.id, user.id, app.transactions, app.instruments)
           inserted++
           touchedInstruments.add(resolvedId)
         } catch (err) {

@@ -184,6 +184,22 @@ The SPA is compiled by Vite to a static `dist/client/` directory and served by F
 for responsive layout and accept a `formatY` prop for custom Y-axis label formatting
 (used by the masking feature to blank out private values).
 
+**Theming.** All color values are CSS custom properties defined once in `App.svelte`'s
+`:root` block (light) and a `:root[data-theme='dark']` override block, rather than
+hardcoded per component — each block also sets `color-scheme` so native controls
+(date/color pickers, scrollbars, checkboxes) follow the theme too. `lib/theme.svelte.ts`
+(mirroring the existing `masked.svelte.ts` rune-store pattern) tracks the active theme,
+persists it to `localStorage`, defaults to the OS `prefers-color-scheme` on first visit,
+and sets `data-theme` on `<html>`. A toggle lives in the Dashboard nav bar next to the
+number-masking toggle. `public/theme-init.js`, referenced as a plain `<script src>` at the
+very top of `index.html`'s `<head>` (before the stylesheet link), applies the same
+stored-or-detected theme synchronously before first paint — a same-origin external file
+rather than an inline script, since the CSP's `script-src 'self'` would otherwise block it.
+Canvas can't consume `var(--token)` directly in its 2D context APIs, so `lib/cssVar.ts`
+resolves a CSS custom property to its literal current value via `getComputedStyle` at draw
+time (with a real color fallback, never the unresolved `var()` string); both chart
+components re-read colors and redraw whenever the theme changes.
+
 ### 4.6 Auth: argon2id + server-side sessions
 
 - **`@node-rs/argon2`** — prebuilt binaries for all platforms (no compilation); argon2id
@@ -361,6 +377,25 @@ visually distinguished from confirmed transactions and carry an explicit "estima
 Projected income is excluded from the confirmed-totals summary; it disappears once the
 actual `ESPP_PURCHASE` transaction is entered and the schedule entry is marked as realised.
 
+**Realising a projection (RSU vest or ESPP purchase):** `linkRealisedProjection()`
+(`src/server/services/tax/recalc.ts`) runs whenever a matching transaction is created,
+edited, or CSV-imported, and links it to the closest pending `vest_schedule` row for the
+same tenant/instrument/schedule-type within a **±7-day tolerance** of the scheduled date
+(real settlement dates commonly drift from the projection by a few days — weekends,
+broker lag). Among candidates within that window and **in the same UK tax year** as the
+transaction, the closest date wins, then the closest quantity — the date tolerance is
+deliberately not allowed to cross the 5/6 April boundary, since that would move projected
+income into the wrong tax year rather than just correcting for settlement drift. Editing a
+transaction off the date/type that matched its projection un-links it again, restoring the
+projected estimate.
+
+Because linking only ever runs on the transaction create/update/import path, a projection
+that already had a matching transaction on file *before* this linking logic existed would
+otherwise stay stuck showing as a duplicate forever. `backfillRealisedProjections()` (same
+file) runs once at server startup and retroactively links any still-unlinked projection
+against existing transactions using the same matching rule — idempotent, so it's a no-op
+once the backlog is cleared.
+
 ### 5.5 CGT computation
 
 Per disposal (or part-disposal), after matching:
@@ -398,6 +433,44 @@ net_tax = dividend_tax − credit
 - **Rates (TY 2026-27, changed):** 10.75% / 35.75% / 39.35%.
 - **US dividends:** W-8BEN secures 15% US withholding (vs 30% default). The FTCR credit
   is capped at `min(actual withholding, 15% × gross, UK tax on that dividend)`.
+
+#### Automatic US withholding
+
+`src/server/services/tax/withholding.ts` defines the treaty rate as a named constant
+(`US_TREATY_DIVIDEND_WITHHOLDING_RATE = '0.15'`), shared with `computeDividendTax`'s own
+treaty-cap default so the two can't drift apart. When a `DIV_PAY` transaction is created,
+edited, CSV-imported, or imported via the Alpha Vantage dividend-history flow for a
+**USD-currency** instrument and no withholding amount was explicitly entered,
+`applyAutoWithholding()` populates `dividend_withholding_gbp` as 15% of the gross GBP
+amount automatically — so US withholding is tracked without manual entry for the common
+case. An explicitly entered value (including one edited in afterwards, e.g. reconciled
+against a real broker statement) always takes precedence and is never overwritten.
+
+**Recompute on edit.** `wasAutoWithheld()` checks whether a transaction's stored
+withholding exactly matches what auto-withholding would compute from its *current* gross
+— i.e. it was populated automatically rather than typed in by hand. The transaction PATCH
+route uses this, evaluated *before* applying the edit: if the withholding still looks
+auto-derived and the edit doesn't explicitly touch it, the field is cleared alongside the
+edit so `applyAutoWithholding()` recomputes it from the new gross afterwards. Without this,
+editing a dividend's quantity or gross amount (e.g. fixing a data-entry mistake) would
+leave withholding stuck at 15% of the *old* gross — a plausible-looking but wrong figure
+that understates the foreign tax credit, rather than the obviously-wrong £0 it would have
+shown before this feature existed.
+
+**Backporting to existing data.** `backfillAutoWithholding()` (same file) runs once at
+server startup (`app.ts`, alongside `backfillRealisedProjections()`) and applies
+auto-withholding to any USD `DIV_PAY` transaction already in the database with no
+withholding recorded — so upgrading to this feature and restarting the server is enough to
+backport it to transactions entered before it existed, with no manual migration step.
+Idempotent: a transaction that already has withholding (auto or explicit) is left alone.
+Audit-log entries for the backfill are attributed to the tenant's own user (looked up by
+`tenant_id`), the same as if the user had triggered the recompute themselves.
+
+**Known limitation:** US-source detection is currency-based (`currency === 'USD'`), not a
+dedicated instrument field. This mis-tags the rare USD-denominated non-US-domiciled
+holding, and misses a GBP-denominated ADR of a US company. Acceptable for now given the
+single-user scope; a per-instrument country/domicile override would be the fix if it ever
+matters.
 
 #### Annual summary vs per-transaction view
 
@@ -572,7 +645,8 @@ claude-tax/
 │   │   │   └── middleware.ts requireAuth hook
 │   │   ├── repositories/     (TypeScript interfaces + SQLite impls)
 │   │   ├── services/
-│   │   │   ├── tax/          CGT engine, S104, B&B matcher, RSU/ESPP helpers
+│   │   │   ├── tax/          CGT engine, S104, B&B matcher, RSU/ESPP helpers,
+│   │   │   │                 dividend WHT/FTCR + auto-withholding, projection linking
 │   │   │   ├── fx/           HMRC + Frankfurter FX fetchers
 │   │   │   └── prices/       PriceProvider interface + adapters
 │   │   └── routes/           Fastify route plugins
@@ -599,8 +673,10 @@ claude-tax/
 │   │       └── lib/
 │   │           ├── api.ts            apiFetch (attaches CSRF token)
 │   │           ├── masked.svelte.ts  global masking state (Svelte rune store)
-│   │           ├── LineChart.svelte  canvas line chart, responsive
-│   │           └── BarChart.svelte   canvas bar chart, +/− values
+│   │           ├── theme.svelte.ts   dark/light theme state, localStorage-persisted
+│   │           ├── cssVar.ts         resolves CSS custom properties for canvas draw calls
+│   │           ├── LineChart.svelte  canvas line chart, responsive, theme-aware
+│   │           └── BarChart.svelte   canvas bar chart, +/− values, theme-aware
 │   └── shared/               Types shared between server and client
 ├── dist/                     Build output (gitignored)
 ├── data/                     SQLite DB file (gitignored)

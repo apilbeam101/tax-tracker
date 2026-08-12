@@ -9,6 +9,7 @@ import {
   recalcInstrument,
   unlinkRealisedProjection,
 } from '../services/tax/recalc.ts'
+import { applyAutoWithholding, wasAutoWithheld } from '../services/tax/withholding.ts'
 
 const TXN_TYPES = [
   'BUY',
@@ -186,6 +187,7 @@ export const transactionRoutes: FastifyPluginAsync = async (app) => {
         txn.quantity,
         txn.id,
       )
+      applyAutoWithholding(user.tenantId, txn.id, user.id, app.transactions, app.instruments)
       recalcInstrument(app, user.tenantId, txn.instrumentId)
       return reply.status(201).send(app.transactions.getById(user.tenantId, txn.id))
     },
@@ -226,7 +228,15 @@ export const transactionRoutes: FastifyPluginAsync = async (app) => {
       const existing = app.transactions.getById(user.tenantId, id)
       if (!existing) return reply.status(404).send({ error: 'Not found' })
 
-      const updated = app.transactions.update(user.tenantId, id, req.body, user.id)
+      // If the stored withholding looks auto-computed (not user-entered) and
+      // this edit doesn't explicitly touch it, clear it so applyAutoWithholding
+      // recomputes from the new gross below instead of leaving a stale figure.
+      const patchBody: UpdateTransactionBody =
+        req.body.dividendWithholdingGbp === undefined && wasAutoWithheld(existing)
+          ? { ...req.body, dividendWithholdingGbp: null }
+          : req.body
+
+      const updated = app.transactions.update(user.tenantId, id, patchBody, user.id)
       if (!updated) return reply.status(404).send({ error: 'Not found' })
 
       // Re-derive GBP fields if price/date/currency changed
@@ -265,6 +275,7 @@ export const transactionRoutes: FastifyPluginAsync = async (app) => {
         updated.quantity,
         id,
       )
+      applyAutoWithholding(user.tenantId, id, user.id, app.transactions, app.instruments)
 
       recalcInstrument(app, user.tenantId, updated.instrumentId)
       return app.transactions.getById(user.tenantId, id)
@@ -453,6 +464,7 @@ export const transactionRoutes: FastifyPluginAsync = async (app) => {
           app.transactions,
           app.instruments,
         )
+        applyAutoWithholding(user.tenantId, txn.id, user.id, app.transactions, app.instruments)
         inserted++
       }
 

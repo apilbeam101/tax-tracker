@@ -148,11 +148,14 @@ export interface CreateTransactionBody {
   notes?: string
 }
 
-export interface UpdateTransactionBody extends Partial<CreateTransactionBody> {
+export interface UpdateTransactionBody
+  extends Omit<Partial<CreateTransactionBody>, 'dividendWithholdingGbp'> {
   // Derived fields written back by the server after FX computation
   unitPriceGbp?: string | null
   totalGbp?: string | null
   netGbp?: string | null
   fxRateSource?: string | null
   esppDiscountPriceGbp?: string | null
+  // Cleared server-side to force a recompute when an auto-withheld value is stale (see withholding.ts)
+  dividendWithholdingGbp?: string | null
 }

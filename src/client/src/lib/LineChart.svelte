@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { cssVar, resolveColor } from './cssVar.ts'
+  import { themeStore } from './theme.svelte.ts'
 
   interface Point { date: string; value: string }
 
   let {
     points = [],
     label = '',
-    color = '#0d6efd',
+    color = 'var(--accent)',
     height = 200,
     formatY = (v: number) => `£${v.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
   }: {
@@ -51,7 +53,7 @@
     }
 
     // Grid lines (5 horizontal)
-    ctx.strokeStyle = '#e9ecef'
+    ctx.strokeStyle = cssVar('--border')
     ctx.lineWidth = 1
     for (let i = 0; i <= 4; i++) {
       const y = PAD.top + (i / 4) * chartH
@@ -61,7 +63,7 @@
       ctx.stroke()
 
       const v = maxV - (i / 4) * range
-      ctx.fillStyle = '#6c757d'
+      ctx.fillStyle = cssVar('--text-muted')
       ctx.font = '11px system-ui, sans-serif'
       ctx.textAlign = 'right'
       ctx.fillText(formatY(v), PAD.left - 6, y + 4)
@@ -70,7 +72,7 @@
     // X-axis labels — show ~5 evenly spaced
     const labelCount = Math.min(5, points.length)
     const step = Math.floor((points.length - 1) / (labelCount - 1)) || 1
-    ctx.fillStyle = '#6c757d'
+    ctx.fillStyle = cssVar('--text-muted')
     ctx.font = '10px system-ui, sans-serif'
     ctx.textAlign = 'center'
     for (let i = 0; i < points.length; i += step) {
@@ -80,9 +82,10 @@
     }
 
     // Fill gradient under line
+    const resolvedColor = resolveColor(color, '#0d6efd')
     const grad = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + chartH)
-    grad.addColorStop(0, color + '33')
-    grad.addColorStop(1, color + '00')
+    grad.addColorStop(0, resolvedColor + '33')
+    grad.addColorStop(1, resolvedColor + '00')
 
     ctx.beginPath()
     ctx.moveTo(px(0), py(values[0]))
@@ -101,7 +104,7 @@
     for (let i = 1; i < points.length; i++) {
       ctx.lineTo(px(i), py(values[i]))
     }
-    ctx.strokeStyle = color
+    ctx.strokeStyle = resolvedColor
     ctx.lineWidth = 2
     ctx.lineJoin = 'round'
     ctx.stroke()
@@ -115,8 +118,9 @@
   })
 
   $effect(() => {
-    // Re-draw when points change
+    // Re-draw when points or theme change
     points
+    themeStore.theme
     draw()
   })
 </script>
@@ -132,5 +136,5 @@
 <style>
   .chart-wrap { position: relative; width: 100%; }
   canvas { display: block; }
-  .empty { display: flex; align-items: center; justify-content: center; height: 120px; color: #6c757d; font-size: .875rem; }
+  .empty { display: flex; align-items: center; justify-content: center; height: 120px; color: var(--text-muted); font-size: .875rem; }
 </style>

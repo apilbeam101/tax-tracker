@@ -1,6 +1,23 @@
 # UK Share Tax Liability Tracker
 
-A self-hosted single-user web app for tracking UK Capital Gains Tax, dividend income, and employment income from RSU/ESPP equity grants. Built on Fastify + Svelte 5 + SQLite — no external database server required.
+A self-hosted single-user web app for tracking UK Capital Gains Tax, dividend income, and employment income from RSU/ESPP equity grants. Built on Fastify + Svelte 5 + SQLite — no external database server required. Supports light and dark themes.
+
+---
+
+## Screenshots
+
+_Populated with dummy data — no real financial information._
+
+| | |
+|---|---|
+| **Dashboard** | ![Dashboard](docs/screenshots/dashboard-light.png) |
+| **Transactions** | ![Transactions](docs/screenshots/transactions-light.png) |
+| **Holdings** | ![Holdings](docs/screenshots/holdings-light.png) |
+| **Tax Summary — light** | ![Tax Summary light](docs/screenshots/tax-summary-light.png) |
+| **Tax Summary — dark** | ![Tax Summary dark](docs/screenshots/tax-summary-dark.png) |
+| **Projections** | ![Projections](docs/screenshots/projections-light.png) |
+| **Import / Export — light** | ![Import/Export light](docs/screenshots/import-export-light.png) |
+| **Import / Export — dark** | ![Import/Export dark](docs/screenshots/import-export-dark.png) |
 
 ---
 
@@ -88,7 +105,7 @@ npm run dev
 
 Open `http://localhost:3000` in your browser. You will be prompted to create a passphrase — this derives the encryption key used for sensitive field-level encryption. **Store this passphrase securely; losing it means losing access to encrypted data.**
 
-After setup, log in with the username and password you created.
+After setup, log in with the username and password you created. A 🌙/☀️ toggle in the nav bar (next to the number-masking toggle) switches between light and dark themes; the choice is remembered in your browser.
 
 ---
 
@@ -130,6 +147,8 @@ Without Tiingo, prices fall back to Yahoo Finance (no API key required). If neit
 1. Get a free API key at [alphavantage.co](https://www.alphavantage.co)
 2. Add to `.env` as `ALPHA_VANTAGE_API_KEY`
 3. Use the "↓ Import dividends" button on the Transactions page to pull dividend history per instrument
+
+For USD-currency holdings, US withholding tax (15% under the UK-US tax treaty, assuming a valid W-8BEN is on file with your broker) is filled in automatically on dividend transactions when no withholding amount is entered or imported. Edit the transaction afterwards if your actual broker statement shows a different figure — an explicit value is never overwritten.
 
 ---
 

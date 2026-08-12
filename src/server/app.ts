@@ -22,6 +22,8 @@ import { createFxService } from './services/fx/index.ts'
 import { createPriceService } from './services/prices/cache.ts'
 import { createTiingoProvider } from './services/prices/tiingo.ts'
 import { createYahooProvider } from './services/prices/yahoo.ts'
+import { backfillRealisedProjections } from './services/tax/recalc.ts'
+import { backfillAutoWithholding } from './services/tax/withholding.ts'
 
 // Resolve client dist relative to the project root (process.cwd()), not the
 // source file location — avoids __dirname/import.meta.url resolution issues
@@ -84,6 +86,14 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
   app.decorate('cgtDisposals', createCgtDisposalStore(db))
   app.decorate('s104Pools', createS104PoolStore(db))
   app.decorate('fx', createFxService(fxRateStore, config.fxRatePolicy))
+
+  // Retroactively link any Projections entries that predate automatic
+  // linking to a matching transaction already on file.
+  backfillRealisedProjections(app)
+
+  // Retroactively apply auto-withholding to USD dividend transactions that
+  // predate this feature.
+  backfillAutoWithholding(app)
 
   const priceStore = createPriceStore(db)
   const priceProviders = [

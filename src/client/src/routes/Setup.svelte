@@ -69,26 +69,28 @@
     min-height: 100vh; padding: 1rem;
   }
   .card {
-    background: white; border-radius: 8px; padding: 2rem;
+    background: var(--surface); border-radius: 8px; padding: 2rem;
     width: 100%; max-width: 420px;
-    box-shadow: 0 2px 12px rgba(0,0,0,.08);
+    box-shadow: 0 2px 12px var(--shadow);
   }
   h1 { margin-top: 0; font-size: 1.4rem; }
-  .hint { color: #6c757d; font-size: .875rem; }
+  .hint { color: var(--text-muted); font-size: .875rem; }
   .error {
-    background: #fff3cd; border: 1px solid #ffc107;
+    background: var(--warning-bg); border: 1px solid var(--warning);
+    color: var(--warning-text);
     border-radius: 4px; padding: .75rem; margin-bottom: 1rem;
     font-size: .875rem;
   }
   label { display: block; margin-bottom: 1rem; font-weight: 500; }
   input {
     display: block; width: 100%; margin-top: .25rem;
-    padding: .5rem .75rem; border: 1px solid #ced4da;
+    padding: .5rem .75rem; border: 1px solid var(--border-strong);
     border-radius: 4px; font-size: 1rem;
+    background: var(--surface); color: var(--text);
   }
   button {
-    width: 100%; padding: .625rem; background: #0d6efd;
-    color: white; border: none; border-radius: 4px;
+    width: 100%; padding: .625rem; background: var(--accent);
+    color: var(--on-accent); border: none; border-radius: 4px;
     font-size: 1rem; cursor: pointer;
   }
   button:disabled { opacity: .65; cursor: not-allowed; }

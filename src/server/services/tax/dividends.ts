@@ -25,9 +25,11 @@ function bigMax(a: Big, b: Big): Big {
 }
 
 import type { TaxYearConfig, Transaction } from '../../../shared/types.ts'
+import { US_TREATY_DIVIDEND_WITHHOLDING_RATE } from './withholding.ts'
 
 export interface DividendTaxResult {
   txnId: number
+  txnDate: string
   taxYear: string
   grossGbp: string
   withholdingGbp: string
@@ -51,14 +53,14 @@ export interface DividendTaxResult {
  *                              this dividend) exceeds the basic rate limit.
  *                              Set to false (default) when uncertain.
  * @param treatyRateMax The maximum foreign withholding rate under the applicable
- *                      treaty (e.g. 0.15 for US-UK).  Defaults to 0.15.
+ *                      treaty. Defaults to the US-UK treaty rate.
  */
 export function computeDividendTax(
   txn: Transaction,
   config: TaxYearConfig,
   taxYear: string,
   incomeAboveBasicRate = false,
-  treatyRateMax = '0.15',
+  treatyRateMax = US_TREATY_DIVIDEND_WITHHOLDING_RATE,
 ): DividendTaxResult {
   // Prefer explicitly-set dividendGrossGbp; fall back to total_gbp (backfill-computed).
   const grossGbp = new Big(txn.dividendGrossGbp ?? txn.totalGbp ?? '0')
@@ -98,6 +100,7 @@ export function computeDividendTax(
 
   return {
     txnId: txn.id,
+    txnDate: txn.txnDate,
     taxYear,
     grossGbp: grossGbp.toFixed(8),
     withholdingGbp: withholdingGbp.toFixed(8),

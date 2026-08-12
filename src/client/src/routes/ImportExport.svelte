@@ -395,13 +395,13 @@
   h2 { margin-bottom: 1rem; }
   h4 { margin: 1rem 0 0.5rem; }
 
-  .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid #ddd; }
-  .tabs button { padding: 0.5rem 1rem; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; }
-  .tabs button.active { border-bottom-color: #0066cc; font-weight: 600; color: #0066cc; }
+  .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border); }
+  .tabs button { padding: 0.5rem 1rem; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; color: var(--text); }
+  .tabs button.active { border-bottom-color: var(--link); font-weight: 600; color: var(--link); }
 
   section { display: flex; flex-direction: column; gap: 1rem; }
 
-  .hint { color: #666; font-size: 0.875rem; margin: 0; }
+  .hint { color: var(--text-muted); font-size: 0.875rem; margin: 0; }
 
   .row { display: flex; gap: 1.5rem; align-items: flex-end; flex-wrap: wrap; }
 
@@ -414,37 +414,39 @@
   textarea {
     font-size: 0.875rem;
     padding: 0.4rem 0.6rem;
-    border: 1px solid #ccc;
+    border: 1px solid var(--border-strong);
     border-radius: 4px;
     font-family: inherit;
+    background: var(--surface);
+    color: var(--text);
   }
   textarea { resize: vertical; width: 100%; box-sizing: border-box; }
 
-  .mapping-section { background: #f9f9f9; padding: 1rem; border-radius: 6px; }
+  .mapping-section { background: var(--surface-alt); padding: 1rem; border-radius: 6px; }
   .mapping-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-  .mapping-table th { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid #ddd; font-weight: 600; }
+  .mapping-table th { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); font-weight: 600; }
   .mapping-table td { padding: 0.3rem 0.5rem; }
   .mapping-table select, .mapping-table input { width: 100%; }
 
-  .btn-link { background: none; border: none; cursor: pointer; color: #cc0000; font-size: 0.85rem; padding: 0 0.3rem; }
-  .btn-secondary { margin-top: 0.5rem; font-size: 0.8rem; padding: 0.3rem 0.8rem; border: 1px solid #999; background: #fff; border-radius: 4px; cursor: pointer; }
+  .btn-link { background: none; border: none; cursor: pointer; color: var(--loss); font-size: 0.85rem; padding: 0 0.3rem; }
+  .btn-secondary { margin-top: 0.5rem; font-size: 0.8rem; padding: 0.3rem 0.8rem; border: 1px solid var(--text-faint); background: var(--surface); color: var(--text); border-radius: 4px; cursor: pointer; }
 
-  .error { color: #cc0000; background: #fff0f0; padding: 0.5rem 0.75rem; border-radius: 4px; font-size: 0.875rem; }
-  .success { color: #006600; background: #f0fff0; padding: 0.5rem 0.75rem; border-radius: 4px; font-size: 0.875rem; }
+  .error { color: var(--danger-text); background: var(--danger-bg); padding: 0.5rem 0.75rem; border-radius: 4px; font-size: 0.875rem; }
+  .success { color: var(--success-text); background: var(--success-bg); padding: 0.5rem 0.75rem; border-radius: 4px; font-size: 0.875rem; }
 
   .actions { display: flex; gap: 0.75rem; }
-  button { padding: 0.5rem 1.25rem; border: 1px solid #999; border-radius: 4px; cursor: pointer; background: #fff; font-size: 0.875rem; }
+  button { padding: 0.5rem 1.25rem; border: 1px solid var(--text-faint); border-radius: 4px; cursor: pointer; background: var(--surface); color: var(--text); font-size: 0.875rem; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-primary { background: #0066cc; color: #fff; border-color: #0066cc; }
-  .btn-primary:hover:not(:disabled) { background: #0055aa; }
+  .btn-primary { background: var(--link); color: var(--on-accent); border-color: var(--link); }
+  .btn-primary:hover:not(:disabled) { background: var(--link-hover); }
 
   .preview-section { overflow: hidden; }
   .scroll-x { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-  th { background: #f0f0f0; padding: 0.4rem 0.6rem; text-align: left; border-bottom: 2px solid #ddd; white-space: nowrap; }
-  td { padding: 0.3rem 0.6rem; border-bottom: 1px solid #eee; }
-  tr.invalid td { background: #fff8f8; }
-  .error-cell { color: #cc0000; font-size: 0.8rem; }
+  th { background: var(--surface-alt); padding: 0.4rem 0.6rem; text-align: left; border-bottom: 2px solid var(--border); white-space: nowrap; }
+  td { padding: 0.3rem 0.6rem; border-bottom: 1px solid var(--border); }
+  tr.invalid td { background: var(--danger-bg); }
+  .error-cell { color: var(--loss); font-size: 0.8rem; }
   .notes-cell { max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .export-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }

@@ -8,6 +8,7 @@
   import BarChart from '../lib/BarChart.svelte'
   import { onMount } from 'svelte'
   import { maskedStore } from '../lib/masked.svelte.ts'
+  import { themeStore } from '../lib/theme.svelte.ts'
 
   type Page = 'dashboard' | 'transactions' | 'holdings' | 'tax' | 'projections' | 'import-export'
 
@@ -172,6 +173,9 @@
       <button type="button" class="mask-btn" class:active={maskedStore.masked} onclick={() => maskedStore.toggle()} title="Toggle number masking">
         {maskedStore.masked ? '👁 Unmask' : '🙈 Mask'}
       </button>
+      <button type="button" class="theme-btn" onclick={() => themeStore.toggle()} title="Toggle dark mode">
+        {themeStore.theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+      </button>
       <span>{user?.username}</span>
       <button type="button" onclick={onlogout}>Sign out</button>
     </div>
@@ -272,7 +276,7 @@
             <div class="chart-placeholder-sm">Loading…</div>
           {:else}
             <div class="chart-card">
-              <BarChart points={dividendPoints} height={180} color="#198754" formatY={maskedFormatY} />
+              <BarChart points={dividendPoints} height={180} color="var(--success)" formatY={maskedFormatY} />
             </div>
           {/if}
         </div>
@@ -324,30 +328,30 @@
   .shell { display: flex; flex-direction: column; min-height: 100vh; }
   header {
     display: flex; align-items: center; gap: 1.5rem;
-    background: #1a1a2e; color: white; padding: .75rem 1.5rem;
+    background: var(--nav-bg); color: var(--nav-text); padding: .75rem 1.5rem;
   }
   .brand { font-weight: 700; font-size: 1.1rem; white-space: nowrap; }
   nav { display: flex; gap: 1rem; flex: 1; }
   nav a { color: rgba(255,255,255,.8); text-decoration: none; font-size: .9rem; }
-  nav a:hover, nav a.active { color: white; font-weight: 600; }
+  nav a:hover, nav a.active { color: var(--nav-text); font-weight: 600; }
   .user-menu { display: flex; align-items: center; gap: .75rem; font-size: .875rem; }
   .user-menu button {
     background: transparent; border: 1px solid rgba(255,255,255,.4);
-    color: white; padding: .25rem .75rem; border-radius: 4px; cursor: pointer; font-size: .875rem;
+    color: var(--nav-text); padding: .25rem .75rem; border-radius: 4px; cursor: pointer; font-size: .875rem;
   }
-  .mask-btn.active { background: rgba(255,193,7,.25); border-color: #ffc107; }
+  .mask-btn.active { background: rgba(255,193,7,.25); border-color: var(--warning); }
   main { padding: 2rem; flex: 1; min-width: 0; }
 
   /* KPI cards */
   .kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2rem; }
-  .kpi-card { background: #fff; border: 1px solid #dee2e6; border-radius: 8px; padding: 1.25rem 1.5rem; }
-  .kpi-card.loading { min-height: 90px; background: #f8f9fa; }
-  .kpi-card.gain { border-left: 4px solid #198754; }
-  .kpi-card.loss { border-left: 4px solid #dc3545; }
-  .kpi-label { font-size: .8rem; color: #6c757d; text-transform: uppercase; letter-spacing: .04em; margin-bottom: .35rem; }
-  .kpi-value { font-size: 1.5rem; font-weight: 700; color: #212529; }
-  .kpi-sub { font-size: .85rem; color: #6c757d; margin-top: .2rem; }
-  .hint { color: #6c757d; font-size: .8rem; }
+  .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem 1.5rem; }
+  .kpi-card.loading { min-height: 90px; background: var(--bg); }
+  .kpi-card.gain { border-left: 4px solid var(--success); }
+  .kpi-card.loss { border-left: 4px solid var(--danger); }
+  .kpi-label { font-size: .8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: .35rem; }
+  .kpi-value { font-size: 1.5rem; font-weight: 700; color: var(--text); }
+  .kpi-sub { font-size: .85rem; color: var(--text-muted); margin-top: .2rem; }
+  .hint { color: var(--text-muted); font-size: .8rem; }
 
   /* Section headers */
   .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: .75rem; }
@@ -356,38 +360,38 @@
   /* Period pills */
   .period-pills { display: flex; gap: .3rem; flex-wrap: wrap; }
   .pill {
-    background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px;
-    padding: .2rem .55rem; font-size: .75rem; cursor: pointer; color: #495057;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    padding: .2rem .55rem; font-size: .75rem; cursor: pointer; color: var(--text-secondary);
   }
-  .pill.active { background: #0d6efd; color: #fff; border-color: #0d6efd; }
+  .pill.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 
   /* Tax year selector */
   .year-select {
-    padding: .25rem .5rem; border: 1px solid #dee2e6; border-radius: 4px;
-    font-size: .875rem; color: #495057; background: #fff; cursor: pointer;
+    padding: .25rem .5rem; border: 1px solid var(--border); border-radius: 4px;
+    font-size: .875rem; color: var(--text-secondary); background: var(--surface); cursor: pointer;
   }
-  .year-badge { background: #e9ecef; color: #495057; padding: .15rem .5rem; border-radius: 4px; font-size: .8rem; }
+  .year-badge { background: var(--surface-alt); color: var(--text-secondary); padding: .15rem .5rem; border-radius: 4px; font-size: .8rem; }
 
   /* Charts */
-  .chart-card { border: 1px solid #dee2e6; border-radius: 8px; padding: 1rem; background: #fff; }
-  .chart-placeholder { height: 220px; display: flex; align-items: center; justify-content: center; color: #6c757d; font-size: .875rem; }
-  .chart-placeholder-sm { height: 180px; display: flex; align-items: center; justify-content: center; color: #6c757d; font-size: .875rem; }
+  .chart-card { border: 1px solid var(--border); border-radius: 8px; padding: 1rem; background: var(--surface); }
+  .chart-placeholder { height: 220px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: .875rem; }
+  .chart-placeholder-sm { height: 180px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: .875rem; }
 
   .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-  .chart-col h4 { margin: 0 0 .6rem; font-size: .9rem; font-weight: 600; color: #495057; }
+  .chart-col h4 { margin: 0 0 .6rem; font-size: .9rem; font-weight: 600; color: var(--text-secondary); }
 
   /* Upcoming events */
-  .see-all { font-size: .875rem; color: #0d6efd; text-decoration: none; }
+  .see-all { font-size: .875rem; color: var(--accent); text-decoration: none; }
   .see-all:hover { text-decoration: underline; }
   .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: .875rem; }
-  th, td { padding: .5rem .75rem; text-align: left; border-bottom: 1px solid #dee2e6; white-space: nowrap; }
-  th { font-weight: 600; color: #495057; background: #f8f9fa; }
+  th, td { padding: .5rem .75rem; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { font-weight: 600; color: var(--text-secondary); background: var(--bg); }
   .num { text-align: right; }
-  .badge { display: inline-block; padding: .125rem .4rem; border-radius: 3px; font-size: .75rem; font-weight: 600; background: #e9ecef; color: #495057; }
-  .badge-rsu-vest { background: #d1ecf1; color: #0c5460; }
-  .badge-espp-purchase { background: #d4edda; color: #155724; }
-  .badge-option-expiry { background: #fff3cd; color: #856404; }
+  .badge { display: inline-block; padding: .125rem .4rem; border-radius: 3px; font-size: .75rem; font-weight: 600; background: var(--surface-alt); color: var(--text-secondary); }
+  .badge-rsu-vest { background: var(--info-bg); color: var(--info-text); }
+  .badge-espp-purchase { background: var(--success-bg); color: var(--success-text); }
+  .badge-option-expiry { background: var(--warning-bg); color: var(--warning-text); }
 
   @media (max-width: 700px) {
     .kpi-row { grid-template-columns: 1fr; }
