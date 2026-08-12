@@ -81,7 +81,6 @@ export const taxRoutes: FastifyPluginAsync = async (app) => {
           app.transactions,
           app.cgtDisposals,
           app.s104Pools,
-          configs,
         )
         return { disposalsRecorded: result.disposals.length, instrumentsProcessed: 1 }
       }

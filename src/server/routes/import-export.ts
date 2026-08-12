@@ -25,6 +25,7 @@ import { buildCgtSummary } from '../services/tax/cgt_summary.ts'
 import { computeDividendTax } from '../services/tax/dividends.ts'
 import { taxYearForDate } from '../services/tax/matching.ts'
 import type { CreateTransactionBody } from '../../shared/types.ts'
+import { recalcInstrument, linkRealisedProjection } from '../services/tax/recalc.ts'
 
 // Shared helper used in transactions route — duplicated here to avoid coupling
 async function computeAndPersistGbpFields(
@@ -213,6 +214,7 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
 
       let inserted = 0
       const errors: { index: number; error: string }[] = []
+      const touchedInstruments = new Set<number>()
 
       for (const row of toInsert) {
         // Resolve instrument: per-row ticker takes priority, fallback to request-level id
@@ -239,10 +241,19 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
             user.tenantId, txn.id, user.id, body,
             app.fx, app.transactions, app.instruments,
           )
+          linkRealisedProjection(app, user.tenantId, resolvedId, body.txnType, body.txnDate, body.quantity, txn.id)
           inserted++
+          touchedInstruments.add(resolvedId)
         } catch (err) {
           errors.push({ index: row.index, error: (err as Error).message })
         }
+      }
+
+      // Recalc once per instrument (not per row) now that all rows are in —
+      // avoids O(n²) recalcs and spurious "exceeds pool" failures from rows
+      // landing out of chronological order mid-import.
+      for (const id of touchedInstruments) {
+        recalcInstrument(app, user.tenantId, id)
       }
 
       return { inserted, errors, skippedInvalid: rows.length - toInsert.length }

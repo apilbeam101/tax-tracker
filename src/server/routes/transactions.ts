@@ -4,6 +4,7 @@ import type { TransactionStore, InstrumentStore } from '../repositories/index.ts
 import type { FxService } from '../services/fx/index.ts'
 import type { CreateTransactionBody, UpdateTransactionBody } from '../../shared/types.ts'
 import { config } from '../config/env.ts'
+import { recalcInstrument, linkRealisedProjection, unlinkRealisedProjection } from '../services/tax/recalc.ts'
 
 const TXN_TYPES = [
   'BUY', 'SELL', 'DIV_PAY', 'DRIP', 'RSU_VEST', 'ESPP_PURCHASE',
@@ -143,6 +144,8 @@ export const transactionRoutes: FastifyPluginAsync = async (app) => {
       }
       const txn = app.transactions.create(user.tenantId, req.body, user.id)
       await computeAndPersistGbpFields(user.tenantId, txn.id, user.id, req.body, app.fx, app.transactions, app.instruments)
+      linkRealisedProjection(app, user.tenantId, txn.instrumentId, txn.txnType, txn.txnDate, txn.quantity, txn.id)
+      recalcInstrument(app, user.tenantId, txn.instrumentId)
       return reply.status(201).send(app.transactions.getById(user.tenantId, txn.id))
     },
   )
@@ -197,14 +200,36 @@ export const transactionRoutes: FastifyPluginAsync = async (app) => {
         ...(updated.esppDiscountPriceNative ? { esppDiscountPriceNative: updated.esppDiscountPriceNative } : {}),
       }
       await computeAndPersistGbpFields(user.tenantId, id, user.id, merged, app.fx, app.transactions, app.instruments)
+
+      // Re-evaluate the Projections link: a txn that moves off the date/type
+      // that matched its projection should stop hiding it, and one that now
+      // matches a different pending projection should link to that instead.
+      unlinkRealisedProjection(app, user.tenantId, id)
+      linkRealisedProjection(app, user.tenantId, updated.instrumentId, updated.txnType, updated.txnDate, updated.quantity, id)
+
+      recalcInstrument(app, user.tenantId, updated.instrumentId)
       return app.transactions.getById(user.tenantId, id)
     },
   )
 
   app.delete<{ Params: { id: string } }>('/:id', async (req, reply) => {
     const user = req.session.user!
-    const deleted = app.transactions.delete(user.tenantId, parseInt(req.params.id, 10), user.id)
+    const id = parseInt(req.params.id, 10)
+    const existing = app.transactions.getById(user.tenantId, id)
+    if (!existing) return reply.status(404).send({ error: 'Not found' })
+
+    // cgt_disposal and vest_schedule rows FK-reference this txn (foreign_keys
+    // is ON) — clear them before deleting, since they've already been created
+    // by the recalc that ran after this txn's own create/update. The recalc
+    // below rebuilds cgt_disposal for the instrument from scratch anyway.
+    app.db.prepare(
+      'DELETE FROM cgt_disposal WHERE tenant_id = ? AND (txn_id = ? OR acquisition_txn_id = ?)',
+    ).run(user.tenantId, id, id)
+    unlinkRealisedProjection(app, user.tenantId, id)
+
+    const deleted = app.transactions.delete(user.tenantId, id, user.id)
     if (!deleted) return reply.status(404).send({ error: 'Not found' })
+    recalcInstrument(app, user.tenantId, existing.instrumentId)
     return reply.status(204).send()
   })
 

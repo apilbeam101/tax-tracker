@@ -4,8 +4,11 @@ import type { CgtDisposalRecord } from '../../services/tax/matching.ts'
 
 export interface CgtDisposalStore {
   list(tenantId: number, opts?: { taxYear?: string; instrumentId?: number }): CgtDisposalRecord[]
-  upsertForTxn(tenantId: number, disposals: CgtDisposalRecord[]): void
-  deleteForInstrument(tenantId: number, instrumentId: number): void
+  /** Atomically replace all disposal records for an instrument: delete then
+   *  re-insert in one transaction, rolling back the delete if the insert fails
+   *  (e.g. a disposal date falls outside configured tax years), so a failed
+   *  recalc never leaves the instrument with zero disposals. */
+  replaceForInstrument(tenantId: number, instrumentId: number, disposals: CgtDisposalRecord[]): void
 }
 
 interface CgtDisposalRow {
@@ -58,17 +61,8 @@ export function createCgtDisposalStore(db: Db): CgtDisposalStore {
       return (db.prepare(sql).all(...params) as unknown as CgtDisposalRow[]).map(toRecord)
     },
 
-    upsertForTxn(tenantId, disposals) {
-      // Delete existing disposal records for these txn IDs, then re-insert.
-      // This allows the engine to be re-run (idempotent).
-      const txnIds = [...new Set(disposals.map(d => d.txnId))]
-      if (txnIds.length === 0) return
-
-      const placeholders = txnIds.map(() => '?').join(',')
-      const del = db.prepare(
-        `DELETE FROM cgt_disposal WHERE tenant_id = ? AND txn_id IN (${placeholders})`
-      )
-
+    replaceForInstrument(tenantId, instrumentId, disposals) {
+      const del = db.prepare('DELETE FROM cgt_disposal WHERE tenant_id = ? AND instrument_id = ?')
       const insert = db.prepare(`
         INSERT INTO cgt_disposal (
           tenant_id, txn_id, instrument_id, disposal_date, tax_year,
@@ -77,11 +71,9 @@ export function createCgtDisposalStore(db: Db): CgtDisposalStore {
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
       `)
 
-      // Atomic: delete old slices and insert new ones in a single transaction
-      // so a mid-run crash never leaves the table partially populated.
       db.exec('BEGIN')
       try {
-        del.run(tenantId, ...txnIds)
+        del.run(tenantId, instrumentId)
         for (const d of disposals) {
           insert.run(
             tenantId,
@@ -103,11 +95,6 @@ export function createCgtDisposalStore(db: Db): CgtDisposalStore {
         try { db.exec('ROLLBACK') } catch { /* ignore */ }
         throw err
       }
-    },
-
-    deleteForInstrument(tenantId, instrumentId) {
-      db.prepare('DELETE FROM cgt_disposal WHERE tenant_id = ? AND instrument_id = ?')
-        .run(tenantId, instrumentId)
     },
   }
 }

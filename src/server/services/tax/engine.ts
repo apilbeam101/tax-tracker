@@ -63,10 +63,14 @@ export function runTaxEngine(
   for (const [instrumentId, txns] of byInstrument) {
     const { disposals, pool } = matchDisposals(txns)
 
-    // Persist disposal records (idempotent: deletes and re-inserts)
-    if (disposals.length > 0) {
-      disposalStore.upsertForTxn(tenantId, disposals)
-    }
+    // Atomically replace this instrument's disposal records: a txn that was
+    // deleted or edited since the last run may no longer appear in the freshly
+    // computed `disposals` array, so the old delete-then-upsert approach could
+    // leave stale rows behind (if keyed only on the new array's txn IDs) or
+    // wipe all disposals with nothing to show for it (if the insert half
+    // failed after the delete had already committed). replaceForInstrument
+    // does both in one transaction, rolling back on failure.
+    disposalStore.replaceForInstrument(tenantId, instrumentId, disposals)
 
     // Persist updated pool state
     poolStore.save(tenantId, instrumentId, pool)
@@ -106,15 +110,11 @@ export function runTaxEngineForInstrument(
   transactions: TransactionStore,
   disposalStore: CgtDisposalStore,
   poolStore: S104PoolStore,
-  taxYearConfigs: TaxYearConfig[],
 ): { disposals: ReturnType<typeof matchDisposals>['disposals']; pool: ReturnType<typeof matchDisposals>['pool'] } {
   const txns = transactions.list(tenantId, { instrumentId })
   const { disposals, pool } = matchDisposals(txns)
 
-  disposalStore.deleteForInstrument(tenantId, instrumentId)
-  if (disposals.length > 0) {
-    disposalStore.upsertForTxn(tenantId, disposals)
-  }
+  disposalStore.replaceForInstrument(tenantId, instrumentId, disposals)
   poolStore.save(tenantId, instrumentId, pool)
 
   return { disposals, pool }
