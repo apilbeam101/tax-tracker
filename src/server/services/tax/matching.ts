@@ -156,8 +156,7 @@ export function matchDisposals(
           if (avail.lte(0)) continue
 
           const matched = bigMin(toMatch, avail)
-          const costPerShare = new Big(acq.unitPriceGbp ?? '0')
-          const allowableCost = costPerShare.times(matched)
+          const allowableCost = matchedAcquisitionCost(acq, matched)
           const proceeds = proceedsPerShare.times(matched)
           // Selling costs are attributed pro-rata across all match slices
           const proRataCosts = totalProceeds.gt(0)
@@ -213,8 +212,7 @@ export function matchDisposals(
           if (avail.lte(0)) continue
 
           const matched = bigMin(toMatch, avail)
-          const costPerShare = new Big(acq.unitPriceGbp ?? '0')
-          const allowableCost = costPerShare.times(matched)
+          const allowableCost = matchedAcquisitionCost(acq, matched)
           const proceeds = proceedsPerShare.times(matched)
           const proRataCosts = totalProceeds.gt(0)
             ? sellingCosts.times(proceeds).div(totalProceeds)
@@ -285,7 +283,10 @@ export function matchDisposals(
       const consumed = new Big(txn.quantity).minus(remaining.get(txn.id) ?? new Big(txn.quantity))
       const netAddition = new Big(txn.quantity).minus(consumed)
       if (netAddition.gt(0) && txn.unitPriceGbp) {
-        const costGbp = new Big(txn.unitPriceGbp).times(netAddition)
+        // Pro-rata so that a part-consumed same-day acquisition carries only
+        // the share of its fees belonging to the shares entering the pool;
+        // the rest went out with the same-day match.
+        const costGbp = matchedAcquisitionCost(txn, netAddition)
         pool = addToPool(pool, netAddition.toFixed(8), costGbp.toFixed(8))
       }
       snapshot(txn)
@@ -315,6 +316,22 @@ export function matchDisposals(
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Allowable cost of `matched` shares taken from one specific acquisition:
+ * purchase price plus that slice's pro-rata share of the acquisition's
+ * incidental costs. Brokerage and fees on acquisition are allowable under
+ * TCGA 1992 s.38(1)(a), so they belong in the cost of the shares and not
+ * only in the gain. Pool-matched disposals pick the same costs up through
+ * the pool cost instead, which is why this is only used for same-day and
+ * 30-day matches.
+ */
+function matchedAcquisitionCost(acq: Transaction, matched: Big): Big {
+  const price = new Big(acq.unitPriceGbp ?? '0').times(matched)
+  const acqQty = new Big(acq.quantity)
+  if (acqQty.lte(0)) return price
+  return price.plus(new Big(acq.costsGbp ?? '0').times(matched).div(acqQty))
+}
 
 /** Sort key for same-date ties: disposals (rank 0) run before everything else. */
 function disposalRank(t: Transaction): number {

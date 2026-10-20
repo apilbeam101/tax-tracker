@@ -99,7 +99,11 @@ export async function generateAnnualReportPdf(opts: {
     doc.font('Helvetica-Bold').fontSize(10)
     const summaryItems = [
       ['Total proceeds', fmt(summary.totalProceeds)],
-      ['Allowable costs', fmt(summary.totalAllowableCost)],
+      ['Acquisition cost (incl. purchase fees)', fmt(summary.totalAllowableCost)],
+      ['Incidental costs of sale', fmt(summary.totalSellingCosts)],
+      // Matches the SA108 "Allowable costs (including purchase price)" box, so
+      // the attached computation reconciles to what is typed into the return.
+      ['Allowable costs (including purchase price)', fmt(summary.totalAllowableCostsForReturn)],
       ['Gross gain', fmt(summary.grossGain)],
       ['Gross loss', fmt(summary.grossLoss)],
       ['Net gain / (loss)', fmt(summary.netGain)],

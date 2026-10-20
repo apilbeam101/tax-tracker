@@ -66,6 +66,45 @@ describe('buildCgtSummary — basic case', () => {
   })
 })
 
+describe('buildCgtSummary — allowable costs for the return', () => {
+  it('sums acquisition cost and incidental costs of sale', () => {
+    const d = disposal({
+      proceedsGbp: '5000',
+      allowableCostGbp: '3000',
+      sellingCostsGbp: '25',
+      gainGbp: '1975',
+    })
+    const summary = buildCgtSummary([d], makeConfig())
+    expect(new Big(summary.totalAllowableCostsForReturn).toFixed(2)).toBe('3025.00')
+  })
+
+  it('reconciles: proceeds − allowable costs === net gain', () => {
+    const txns = [
+      disposal({
+        proceedsGbp: '5000',
+        allowableCostGbp: '3000',
+        sellingCostsGbp: '25',
+        gainGbp: '1975',
+      }),
+      disposal({
+        txnId: 2,
+        proceedsGbp: '2000',
+        allowableCostGbp: '2500',
+        sellingCostsGbp: '10',
+        gainGbp: '-510',
+      }),
+    ]
+    const summary = buildCgtSummary(txns, makeConfig())
+    const reconciled = new Big(summary.totalProceeds).minus(summary.totalAllowableCostsForReturn)
+    expect(reconciled.toFixed(2)).toBe(new Big(summary.netGain).toFixed(2))
+  })
+
+  it('is zero when there are no disposals', () => {
+    const summary = buildCgtSummary([], makeConfig())
+    expect(new Big(summary.totalAllowableCostsForReturn).toFixed(2)).toBe('0.00')
+  })
+})
+
 describe('buildCgtSummary — losses offset gains', () => {
   it('loss reduces net gain before AEA is applied', () => {
     const gain1 = disposal({ gainGbp: '8000' })
