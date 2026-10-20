@@ -130,6 +130,90 @@ describe('matchDisposals — same-day rule', () => {
     // Actually same-day buy was all matched; original buy 100 - 50 sold from pool = 50 remain
     expect(new Big(pool.quantity).toFixed(0)).toBe('50')
   })
+
+  // Regression: same-date ties were broken by id alone, so an acquisition
+  // entered before its same-day disposal was processed first, added to the pool
+  // in full, and the same-day-matched shares were never deducted from it. The
+  // test above only passed because its SELL was declared (and so numbered)
+  // before the same-day BUY.
+  it.each([
+    ['disposal entered first', false],
+    ['acquisition entered first', true],
+  ])('same-day match leaves the same pool — %s', (_label, acquisitionFirst) => {
+    const pre = txn({
+      txnType: 'BUY',
+      txnDate: '2024-01-10',
+      quantity: '100',
+      unitPriceGbp: '10.00',
+    })
+    // txn() assigns ids in call order, so construction order is entry order.
+    const txns = acquisitionFirst
+      ? [
+          pre,
+          txn({ txnType: 'BUY', txnDate: '2024-06-01', quantity: '50', unitPriceGbp: '19.00' }),
+          txn({ txnType: 'SELL', txnDate: '2024-06-01', quantity: '100', unitPriceGbp: '20.00' }),
+        ]
+      : [
+          pre,
+          txn({ txnType: 'SELL', txnDate: '2024-06-01', quantity: '100', unitPriceGbp: '20.00' }),
+          txn({ txnType: 'BUY', txnDate: '2024-06-01', quantity: '50', unitPriceGbp: '19.00' }),
+        ]
+
+    const { disposals, pool } = matchDisposals(txns)
+
+    const sdMatch = disposals.find((d) => d.matchType === 'same-day')!
+    const poolMatch = disposals.find((d) => d.matchType === 's104-pool')!
+    expect(new Big(sdMatch.quantity).toFixed(0)).toBe('50')
+    expect(new Big(sdMatch.allowableCostGbp).toFixed(2)).toBe('950.00')
+    expect(new Big(poolMatch.quantity).toFixed(0)).toBe('50')
+    expect(new Big(poolMatch.allowableCostGbp).toFixed(2)).toBe('500.00')
+    // The 50 same-day-matched shares must not remain in the pool.
+    expect(new Big(pool.quantity).toFixed(0)).toBe('50')
+    expect(new Big(pool.costGbp).toFixed(2)).toBe('500.00')
+  })
+
+  it('a fully same-day-matched disposal leaves only the unmatched remainder in the pool', () => {
+    // A same-day purchase larger than the sale, entered before it: the sale is
+    // wholly same-day matched, so the pool should gain only the 20 unmatched
+    // shares and lose nothing.
+    const txns = [
+      txn({ txnType: 'BUY', txnDate: '2024-02-01', quantity: '100', unitPriceGbp: '50.00' }),
+      txn({ txnType: 'BUY', txnDate: '2024-03-01', quantity: '80', unitPriceGbp: '60.00' }),
+      txn({ txnType: 'SELL', txnDate: '2024-03-01', quantity: '60', unitPriceGbp: '65.00' }),
+      txn({ txnType: 'BUY', txnDate: '2024-09-01', quantity: '40', unitPriceGbp: '55.00' }),
+    ]
+    const { disposals, pool } = matchDisposals(txns)
+
+    // Entirely same-day matched — nothing should come out of the pool.
+    expect(disposals).toHaveLength(1)
+    expect(disposals[0]!.matchType).toBe('same-day')
+    // 60 × £60 same-day cost, not 60 × the £50 pool average
+    expect(new Big(disposals[0]!.allowableCostGbp).toFixed(2)).toBe('3600.00')
+
+    // 100 + 20 (unmatched remainder of the same-day buy) + 40
+    expect(new Big(pool.quantity).toFixed(0)).toBe('160')
+    expect(new Big(pool.costGbp).toFixed(2)).toBe('8400.00')
+  })
+
+  it('pool history reconciles to the final pool state', () => {
+    const txns = [
+      txn({ txnType: 'BUY', txnDate: '2024-02-01', quantity: '100', unitPriceGbp: '50.00' }),
+      txn({ txnType: 'BUY', txnDate: '2024-03-01', quantity: '80', unitPriceGbp: '60.00' }),
+      txn({ txnType: 'SELL', txnDate: '2024-03-01', quantity: '60', unitPriceGbp: '65.00' }),
+    ]
+    const { pool, history } = matchDisposals(txns)
+
+    expect(history).toHaveLength(3)
+    // Disposal is processed before the same-day acquisition, and leaves the
+    // pool untouched because it was matched outside it.
+    expect(history[1]!.txnType).toBe('SELL')
+    expect(history[1]!.matchTypes).toEqual(['same-day'])
+    expect(new Big(history[1]!.quantity).toFixed(0)).toBe('100')
+
+    const last = history[history.length - 1]!
+    expect(last.quantity).toBe(pool.quantity)
+    expect(last.costGbp).toBe(pool.costGbp)
+  })
 })
 
 // ── 30-day (bed & breakfast) rule ────────────────────────────────────────────

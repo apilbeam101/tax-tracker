@@ -651,11 +651,11 @@
         <div class="row">
           <label>
             Ticker *
-            <input type="text" bind:value={newInstForm.ticker} placeholder="e.g. CSCO" maxlength="32" style="text-transform:uppercase" />
+            <input type="text" bind:value={newInstForm.ticker} placeholder="e.g. ACME" maxlength="32" style="text-transform:uppercase" />
           </label>
           <label class="wide">
             Name *
-            <input type="text" bind:value={newInstForm.name} placeholder="e.g. Cisco Systems" />
+            <input type="text" bind:value={newInstForm.name} placeholder="e.g. Acme Corporation" />
           </label>
           <label>
             Currency *

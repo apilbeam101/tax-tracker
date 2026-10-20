@@ -40,12 +40,12 @@ function mkTxn(
   }
 }
 
-const CSCO: Instrument = {
+const ACME: Instrument = {
   id: 1,
   tenantId: 1,
-  ticker: 'CSCO',
+  ticker: 'ACME',
   isin: null,
-  name: 'Cisco',
+  name: 'Acme',
   currency: 'USD',
   exchange: 'NASDAQ',
   instrumentType: 'equity',
@@ -55,7 +55,7 @@ const CSCO: Instrument = {
   createdAt: '2025-01-01T00:00:00Z',
 }
 
-const instrumentsById = new Map([[1, CSCO]])
+const instrumentsById = new Map([[1, ACME]])
 
 describe('cgtcalculator.com exporter', () => {
   it('formats a BUY row with DD/MM/YYYY date and GBP price (not pence)', () => {
@@ -73,7 +73,7 @@ describe('cgtcalculator.com exporter', () => {
     const r = rows[0]!
     expect(r.action).toBe('B')
     expect(r.date).toBe('12/01/2004')
-    expect(r.company).toBe('CSCO')
+    expect(r.company).toBe('ACME')
     expect(r.shares).toBe('10000')
     expect(r.price).toBe('0.525') // pounds, not pence
     expect(r.charges).toBe('10.0')
@@ -143,7 +143,7 @@ describe('cgtcalculator.com exporter', () => {
     expect(lines).toHaveLength(2)
     // Tab-delimited, 7 fields: action date company shares price charges stampDuty
     expect(lines[0]!.split('\t')).toHaveLength(7)
-    expect(lines[0]).toBe('B\t12/01/2004\tCSCO\t10000\t0.525\t10.0\t0')
-    expect(lines[1]).toBe('S\t23/02/2004\tCSCO\t5000\t1.75\t12.50\t0')
+    expect(lines[0]).toBe('B\t12/01/2004\tACME\t10000\t0.525\t10.0\t0')
+    expect(lines[1]).toBe('S\t23/02/2004\tACME\t5000\t1.75\t12.50\t0')
   })
 })

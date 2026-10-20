@@ -240,9 +240,9 @@ You export all positions from a broker in one file:
 
 ```
 Ticker,Date,Type,Qty,UnitPrice,Ccy
-CSCO,06/04/2024,BUY,100,55.20,USD
-AAPL,06/04/2024,BUY,20,170.00,USD
-CSCO,30/04/2024,SELL,50,57.40,USD
+ACME,06/04/2024,BUY,100,55.20,USD
+GLOBEX,06/04/2024,BUY,20,170.00,USD
+ACME,30/04/2024,SELL,50,57.40,USD
 ```
 
 Request body (no `instrumentId` — resolved per row via ticker):

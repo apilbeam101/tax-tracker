@@ -26,6 +26,7 @@ import {
   applyStockSplit,
   disposeFromPool,
   emptyPool,
+  poolAvgCost,
   type S104PoolState,
 } from './pool.ts'
 
@@ -41,6 +42,25 @@ export interface CgtDisposalRecord {
   allowableCostGbp: string
   sellingCostsGbp: string
   gainGbp: string
+}
+
+/**
+ * Pool state after a single transaction, in processing order. Emitted for every
+ * transaction the matcher considers so the running cost basis can be displayed
+ * and reconciled against the persisted pool.
+ *
+ * `matchTypes` is populated for disposals only. A disposal fully matched
+ * same-day or under the 30-day rule leaves the pool untouched, so without the
+ * match types a zero-delta row is indistinguishable from a missed deduction.
+ */
+export interface PoolSnapshot {
+  txnId: number
+  date: string
+  txnType: string
+  quantity: string
+  costGbp: string
+  avgCostGbp: string
+  matchTypes: MatchType[]
 }
 
 /** Identifies which UK tax year a date falls in, e.g. "2025-26". */
@@ -62,17 +82,41 @@ export function taxYearForDate(date: string): string {
 export function matchDisposals(
   transactions: Transaction[],
   initialPool: S104PoolState = emptyPool(),
-): { disposals: CgtDisposalRecord[]; pool: S104PoolState } {
+): { disposals: CgtDisposalRecord[]; pool: S104PoolState; history: PoolSnapshot[] } {
   // Work only with transactions that affect the S104 pool or generate disposals.
-  // Sort by date ascending, then by id (stable order within same date).
+  // Sort by date ascending, then disposals before everything else, then by id.
+  //
+  // The disposals-first tie-break is load-bearing, not cosmetic: the pool
+  // addition below reduces an acquisition by however much same-day matching
+  // already consumed, and that bookkeeping (the `remaining` map) is only
+  // written when the disposal is processed. Ordering a same-day acquisition
+  // first put its full quantity into the pool and the same-day-matched shares
+  // were then never removed, permanently inflating pool quantity and cost.
+  // It is also the correct reading of s.105: a same-day acquisition is matched
+  // against that day's disposal and never belongs to the pool for it.
   const sorted = [...transactions].sort((a, b) => {
     if (a.txnDate < b.txnDate) return -1
     if (a.txnDate > b.txnDate) return 1
+    const rank = disposalRank(a) - disposalRank(b)
+    if (rank !== 0) return rank
     return a.id - b.id
   })
 
   const disposals: CgtDisposalRecord[] = []
+  const history: PoolSnapshot[] = []
   let pool = { ...initialPool }
+
+  const snapshot = (txn: Transaction, matchTypes: MatchType[] = []): void => {
+    history.push({
+      txnId: txn.id,
+      date: txn.txnDate,
+      txnType: txn.txnType,
+      quantity: pool.quantity,
+      costGbp: pool.costGbp,
+      avgCostGbp: poolAvgCost(pool),
+      matchTypes,
+    })
+  }
 
   // Collect acquisitions for 30-day B&B matching (keyed by date)
   // We need look-ahead: when we hit a SELL, scan forward 30 days.
@@ -98,6 +142,7 @@ export function matchDisposals(
   for (const txn of sorted) {
     if (txn.txnType === 'SELL' || txn.txnType === 'TRANSFER_OUT') {
       let toMatch = new Big(txn.quantity)
+      const matchTypes: MatchType[] = []
       const proceedsPerShare = new Big(txn.unitPriceGbp ?? '0')
       const totalProceeds = proceedsPerShare.times(toMatch)
       const sellingCosts = new Big(txn.costsGbp ?? '0')
@@ -136,7 +181,9 @@ export function matchDisposals(
 
           remaining.set(acq.id, avail.minus(matched))
           // Same-day acquisitions that are matched do NOT enter the S104 pool;
-          // we need to remember this so pool additions below are reduced.
+          // the `remaining` decrement above is what the pool addition reads to
+          // reduce itself, which is why disposals must sort before acquisitions.
+          matchTypes.push('same-day')
           toMatch = toMatch.minus(matched)
         }
       }
@@ -189,6 +236,7 @@ export function matchDisposals(
           })
 
           remaining.set(acq.id, avail.minus(matched))
+          matchTypes.push('30-day')
           toMatch = toMatch.minus(matched)
         }
       }
@@ -226,8 +274,11 @@ export function matchDisposals(
           gainGbp: gain.toFixed(8),
         })
 
+        matchTypes.push('s104-pool')
         toMatch = new Big(0)
       }
+
+      snapshot(txn, matchTypes)
     } else if (isAcquisition(txn)) {
       // Add to S104 pool — but only the shares that were NOT already consumed
       // by same-day matching above.
@@ -237,28 +288,38 @@ export function matchDisposals(
         const costGbp = new Big(txn.unitPriceGbp).times(netAddition)
         pool = addToPool(pool, netAddition.toFixed(8), costGbp.toFixed(8))
       }
+      snapshot(txn)
     } else if (txn.txnType === 'SPLIT' && txn.splitRatio) {
       pool = applyStockSplit(pool, txn.splitRatio)
+      snapshot(txn)
     } else if (txn.txnType === 'UNSPLIT' && txn.splitRatio) {
       // Reverse split: the ratio stored is "new/old" from the original split,
       // so an unsplit flips it.
       const [num, den] = txn.splitRatio.split('/')
       pool = applyStockSplit(pool, `${den}/${num}`)
+      snapshot(txn)
     } else if (txn.txnType === 'CAPRETURN' && txn.capreturnsPerShareGbp) {
       pool = applyCapReturn(pool, txn.capreturnsPerShareGbp)
+      snapshot(txn)
     } else if (txn.txnType === 'RIGHTS_ISSUE' && txn.unitPriceGbp) {
       pool = applyRightsIssue(
         pool,
         txn.quantity,
         new Big(txn.unitPriceGbp).times(txn.quantity).toFixed(8),
       )
+      snapshot(txn)
     }
   }
 
-  return { disposals, pool }
+  return { disposals, pool, history }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Sort key for same-date ties: disposals (rank 0) run before everything else. */
+function disposalRank(t: Transaction): number {
+  return t.txnType === 'SELL' || t.txnType === 'TRANSFER_OUT' ? 0 : 1
+}
 
 function isAcquisition(t: Transaction): boolean {
   // DRIP (dividend reinvestment) shares enter the pool like any other purchase.

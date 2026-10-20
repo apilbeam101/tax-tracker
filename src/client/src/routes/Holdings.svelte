@@ -28,6 +28,7 @@
     quantity: string
     costGbp: string
     avgCostGbp: string
+    matchTypes: string[]
   }
 
   let holdings: HoldingRow[] = $state([])
@@ -192,7 +193,7 @@
                 {:else}
                   <div class="history-wrap">
                     <h4>S104 pool history — {h.instrument.ticker}</h4>
-                    <p class="history-hint">Shows the pool state after each acquisition or disposal. Avg cost is the running HMRC average cost per share.</p>
+                    <p class="history-hint">Shows the pool state after each event that affects it. Avg cost is the running HMRC average cost per share. A disposal matched same-day or under the 30-day rule leaves the pool unchanged.</p>
                     <table class="history-table">
                       <thead>
                         <tr>
@@ -207,7 +208,12 @@
                         {#each history as entry (entry.txnId)}
                           <tr>
                             <td>{entry.date}</td>
-                            <td><span class="badge badge-{entry.txnType.toLowerCase()}">{entry.txnType}</span></td>
+                            <td>
+                              <span class="badge badge-{entry.txnType.toLowerCase()}">{entry.txnType}</span>
+                              {#if entry.matchTypes.length > 0}
+                                <span class="match-types">{[...new Set(entry.matchTypes)].join(' + ')}</span>
+                              {/if}
+                            </td>
                             <td class="num">{maskedStore.masked ? '••••' : parseFloat(entry.quantity).toLocaleString('en-GB', { maximumFractionDigits: 6 })}</td>
                             <td class="num">{fmtGbp(entry.costGbp)}</td>
                             <td class="num avg">{`£${parseFloat(entry.avgCostGbp).toLocaleString('en-GB', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`}</td>
@@ -300,6 +306,8 @@
   .badge { display: inline-block; padding: .125rem .4rem; border-radius: 3px; font-size: .75rem; font-weight: 600; background: var(--surface-alt); color: var(--text-secondary); }
   .badge-buy, .badge-rsu_vest, .badge-espp_purchase, .badge-transfer_in, .badge-drip { background: var(--info-bg); color: var(--info-text); }
   .badge-sell, .badge-transfer_out { background: var(--danger-bg); color: var(--danger-text); }
+
+  .match-types { margin-left: .4rem; font-size: .72rem; color: var(--text-muted); }
 
   .error {
     background: var(--danger-bg); border: 1px solid var(--danger-bg-alt); color: var(--danger-text); border-radius: 4px;

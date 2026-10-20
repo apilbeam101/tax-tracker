@@ -2,7 +2,7 @@ import type { PriceProvider } from './provider.ts'
 
 // Yahoo Finance v8 chart API — no API key required.
 // Requires a browser-like User-Agent; server-side fetch with the default Node agent is blocked.
-// UK/LSE tickers: append ".L" (SGLN → SGLN.L). Yahoo returns prices in GBp (pence) for LSE,
+// UK/LSE tickers: append ".L" (EXMP → EXMP.L). Yahoo returns prices in GBp (pence) for LSE,
 // same unit as Stooq did — the existing GBX ÷ 100 paths in the codebase are unchanged.
 // EUR tickers: ".DE" (Frankfurt). US tickers: no suffix.
 // Free tier limits are undocumented; for personal use (tens of requests/day) it is reliable.

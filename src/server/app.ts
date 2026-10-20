@@ -22,7 +22,7 @@ import { createFxService } from './services/fx/index.ts'
 import { createPriceService } from './services/prices/cache.ts'
 import { createTiingoProvider } from './services/prices/tiingo.ts'
 import { createYahooProvider } from './services/prices/yahoo.ts'
-import { backfillRealisedProjections } from './services/tax/recalc.ts'
+import { backfillRealisedProjections, recalcAllInstruments } from './services/tax/recalc.ts'
 import { backfillAutoWithholding } from './services/tax/withholding.ts'
 
 // Resolve client dist relative to the project root (process.cwd()), not the
@@ -94,6 +94,11 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
   // Retroactively apply auto-withholding to USD dividend transactions that
   // predate this feature.
   backfillAutoWithholding(app)
+
+  // Rebuild S104 pools and disposal records from the transactions. Repairs
+  // pools persisted before the same-day matching order fix, which left
+  // same-day-matched shares sitting in the pool.
+  recalcAllInstruments(app)
 
   const priceStore = createPriceStore(db)
   const priceProviders = [

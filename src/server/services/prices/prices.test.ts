@@ -54,7 +54,7 @@ describe('PriceService — cache hit', () => {
     })
     const svc = createPriceService(store, [provider])
 
-    const result = await svc.getPrice(42, 'CSCO', 'USD', '2025-06-01')
+    const result = await svc.getPrice(42, 'ACME', 'USD', '2025-06-01')
     expect(result).toBe(cached)
     expect(provider.getPrice).not.toHaveBeenCalled()
   })
@@ -69,8 +69,8 @@ describe('PriceService — cache miss', () => {
     const provider = makeProvider(providerResult)
     const svc = createPriceService(store, [provider])
 
-    const result = await svc.getPrice(42, 'CSCO', 'USD', '2025-06-01')
-    expect(provider.getPrice).toHaveBeenCalledWith('CSCO', 'USD', '2025-06-01')
+    const result = await svc.getPrice(42, 'ACME', 'USD', '2025-06-01')
+    expect(provider.getPrice).toHaveBeenCalledWith('ACME', 'USD', '2025-06-01')
     expect(store.upsert).toHaveBeenCalledWith({ instrumentId: 42, ...providerResult })
     expect(result?.closePrice).toBe('55.12')
   })
@@ -85,14 +85,14 @@ describe('PriceService — cache miss', () => {
     )
     const svc = createPriceService(store, [failing, fallback])
 
-    const result = await svc.getPrice(42, 'CSCO', 'USD', '2025-06-01')
+    const result = await svc.getPrice(42, 'ACME', 'USD', '2025-06-01')
     expect(result?.source).toBe('yahoo')
   })
 
   it('returns null when all providers fail to return data', async () => {
     const store = makeStore(undefined)
     const svc = createPriceService(store, [makeProvider(null)])
-    const result = await svc.getPrice(42, 'CSCO', 'USD', '2025-06-01')
+    const result = await svc.getPrice(42, 'ACME', 'USD', '2025-06-01')
     expect(result).toBeNull()
     expect(store.upsert).not.toHaveBeenCalled()
   })
@@ -114,7 +114,7 @@ describe('PriceService — fetchRange', () => {
     }
     const svc = createPriceService(store, [provider])
 
-    const result = await svc.fetchRange(42, 'CSCO', 'USD', '2025-06-01', '2025-06-02')
+    const result = await svc.fetchRange(42, 'ACME', 'USD', '2025-06-01', '2025-06-02')
     expect(result).toHaveLength(2)
     expect(store.upsert).toHaveBeenCalledTimes(2)
   })
@@ -158,7 +158,7 @@ describe('Yahoo Finance provider — response parsing', () => {
     })) as unknown as typeof fetch
 
     const provider = createYahooProvider()
-    const results = await provider.getHistoricalPrices('CSCO', 'USD', '2025-06-01', '2025-06-02')
+    const results = await provider.getHistoricalPrices('ACME', 'USD', '2025-06-01', '2025-06-02')
     expect(results).toHaveLength(2)
     expect(results[0]).toEqual({ priceDate: '2025-06-01', closePrice: '55.12', source: 'yahoo' })
     expect(results[1]).toEqual({ priceDate: '2025-06-02', closePrice: '55.5', source: 'yahoo' })
@@ -172,7 +172,7 @@ describe('Yahoo Finance provider — response parsing', () => {
     })) as unknown as typeof fetch
 
     const provider = createYahooProvider()
-    const results = await provider.getHistoricalPrices('CSCO', 'USD', '2025-06-01', '2025-06-01')
+    const results = await provider.getHistoricalPrices('ACME', 'USD', '2025-06-01', '2025-06-01')
     expect(results[0]?.closePrice).toBe('54.8')
   })
 
@@ -184,7 +184,7 @@ describe('Yahoo Finance provider — response parsing', () => {
     })) as unknown as typeof fetch
 
     const provider = createYahooProvider()
-    const results = await provider.getHistoricalPrices('CSCO', 'USD', '2025-06-01', '2025-06-02')
+    const results = await provider.getHistoricalPrices('ACME', 'USD', '2025-06-01', '2025-06-02')
     expect(results).toHaveLength(1)
   })
 
@@ -213,8 +213,8 @@ describe('Yahoo Finance provider — response parsing', () => {
     })) as unknown as typeof fetch
 
     const provider = createYahooProvider()
-    await provider.getHistoricalPrices('SGLN', 'GBX', '2025-06-01', '2025-06-01')
-    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toContain('SGLN.L')
+    await provider.getHistoricalPrices('EXMP', 'GBX', '2025-06-01', '2025-06-01')
+    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toContain('EXMP.L')
   })
 
   it('divides by 100 when Yahoo returns GBp but caller expects GBP (pounds)', async () => {
@@ -241,7 +241,7 @@ describe('Yahoo Finance provider — response parsing', () => {
     })) as unknown as typeof fetch
 
     const provider = createYahooProvider()
-    const results = await provider.getHistoricalPrices('SGLN', 'GBP', '2025-06-01', '2025-06-01')
+    const results = await provider.getHistoricalPrices('EXMP', 'GBP', '2025-06-01', '2025-06-01')
     expect(results[0]?.closePrice).toBe('60.89')
   })
 })

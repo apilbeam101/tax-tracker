@@ -176,7 +176,7 @@ describe('toCreateBody', () => {
 
 describe('ticker field', () => {
   it('maps a ticker column and exposes it on the row', () => {
-    const csv = `Ticker,Type,Date,Shares\nCSCO,BUY,2024-04-01,100\nAAPL,SELL,2025-01-15,50\n`
+    const csv = `Ticker,Type,Date,Shares\nACME,BUY,2024-04-01,100\nGLOBEX,SELL,2025-01-15,50\n`
     const mappings: ColumnMapping[] = [
       { source: 'Ticker', target: 'ticker' },
       { source: 'Type', target: 'txnType' },
@@ -184,8 +184,8 @@ describe('ticker field', () => {
       { source: 'Shares', target: 'quantity' },
     ]
     const rows = mapCsvToTransactions(csv, mappings)
-    expect(rows[0]!.ticker).toBe('CSCO')
-    expect(rows[1]!.ticker).toBe('AAPL')
+    expect(rows[0]!.ticker).toBe('ACME')
+    expect(rows[1]!.ticker).toBe('GLOBEX')
     expect(rows[0]!.errors).toHaveLength(0)
     expect(rows[1]!.errors).toHaveLength(0)
   })
