@@ -9,6 +9,7 @@
     totalProceeds: string
     totalAllowableCost: string
     totalSellingCosts: string
+    totalAllowableCostsForReturn: string
     grossGain: string
     grossLoss: string
     netGain: string
@@ -311,6 +312,13 @@
         <h4>CGT breakdown</h4>
         <table class="breakdown">
           <tbody>
+            <tr><td>Disposal proceeds</td><td class="right">{gbp(summary.totalProceeds)}</td></tr>
+            <tr><td class="indent">Acquisition cost (incl. purchase fees)</td><td class="right">{gbp(summary.totalAllowableCost)}</td></tr>
+            <tr><td class="indent">Incidental costs of sale</td><td class="right">{gbp(summary.totalSellingCosts)}</td></tr>
+            <tr class="highlight">
+              <td>Allowable costs (including purchase price)<span class="box-hint">SA108 — Listed shares and securities</span></td>
+              <td class="right">{gbp(summary.totalAllowableCostsForReturn)}</td>
+            </tr>
             <tr><td>Gross gains</td><td class="right gain">{gbp(summary.grossGain)}</td></tr>
             <tr><td>Gross losses</td><td class="right loss">{gbp(summary.grossLoss)}</td></tr>
             <tr><td>Net gain / (loss)</td><td class="right {signClass(summary.netGain)}">{gbp(summary.netGain)}</td></tr>
@@ -622,6 +630,8 @@
   th { background: var(--bg); font-weight: 600; }
   .right { text-align: right; }
   tr.highlight td { background: var(--bg); font-weight: 600; }
+  td.indent { padding-left: 1.5rem; color: var(--text-muted); }
+  .box-hint { display: block; font-size: .7rem; font-weight: 400; color: var(--text-muted); }
 
   .badge { font-size: .75rem; padding: .2rem .5rem; border-radius: 4px; white-space: nowrap; }
   .badge-same-day { background: var(--info-bg-alt); color: var(--info-text-alt); }

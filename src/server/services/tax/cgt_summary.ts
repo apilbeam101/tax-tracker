@@ -29,8 +29,17 @@ import type { CgtDisposalRecord } from './matching.ts'
 export interface CgtSummary {
   taxYear: string
   totalProceeds: string
+  /** Acquisition cost of the disposed shares, including incidental purchase costs */
   totalAllowableCost: string
   totalSellingCosts: string
+  /**
+   * Figure for the SA108 "Allowable costs (including purchase price)" box:
+   * acquisition cost plus incidental costs of both purchase and sale.
+   * Purchase incidentals arrive inside `totalAllowableCost` (via the pool cost
+   * or a matched acquisition), so this is simply the two summed — and
+   * totalProceeds − this === netGain by construction.
+   */
+  totalAllowableCostsForReturn: string
   grossGain: string
   grossLoss: string
   netGain: string
@@ -130,6 +139,7 @@ export function buildCgtSummary(
     totalProceeds: proceedsStr,
     totalAllowableCost: totalAllowableCost.toFixed(8),
     totalSellingCosts: totalSellingCosts.toFixed(8),
+    totalAllowableCostsForReturn: totalAllowableCost.plus(totalSellingCosts).toFixed(8),
     grossGain: totalGains.toFixed(8),
     grossLoss: totalLosses.toFixed(8),
     netGain: netGain.toFixed(8),
@@ -153,6 +163,7 @@ function emptySummary(config: TaxYearConfig): CgtSummary {
     totalProceeds: zero,
     totalAllowableCost: zero,
     totalSellingCosts: zero,
+    totalAllowableCostsForReturn: zero,
     grossGain: zero,
     grossLoss: zero,
     netGain: zero,

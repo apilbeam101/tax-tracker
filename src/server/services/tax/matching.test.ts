@@ -195,6 +195,27 @@ describe('matchDisposals — same-day rule', () => {
     expect(new Big(pool.costGbp).toFixed(2)).toBe('8400.00')
   })
 
+  it('includes a pro-rata share of acquisition fees in a same-day match', () => {
+    const txns = [
+      txn({
+        txnType: 'BUY',
+        txnDate: '2024-03-01',
+        quantity: '80',
+        unitPriceGbp: '60.00',
+        costsGbp: '16.00',
+      }),
+      txn({ txnType: 'SELL', txnDate: '2024-03-01', quantity: '60', unitPriceGbp: '65.00' }),
+    ]
+    const { disposals, pool } = matchDisposals(txns)
+
+    // 60 × £60 = £3600, plus 60/80 of the £16 fee = £12
+    expect(disposals[0]!.matchType).toBe('same-day')
+    expect(new Big(disposals[0]!.allowableCostGbp).toFixed(2)).toBe('3612.00')
+    // The remaining 20 shares carry the other £4 of fees into the pool
+    expect(new Big(pool.quantity).toFixed(0)).toBe('20')
+    expect(new Big(pool.costGbp).toFixed(2)).toBe('1204.00')
+  })
+
   it('pool history reconciles to the final pool state', () => {
     const txns = [
       txn({ txnType: 'BUY', txnDate: '2024-02-01', quantity: '100', unitPriceGbp: '50.00' }),
