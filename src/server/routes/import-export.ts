@@ -19,6 +19,7 @@ import { formatCgtCalculator, toCgtCalculatorRows } from '../services/export/cgt
 import {
   buildDisposalComputations,
   formatComputationsText,
+  scopePoolHistoryForReport,
 } from '../services/export/computation.ts'
 import { disposalsToCsv, transactionsToCsv } from '../services/export/csv.ts'
 import type { DividendRow, HoldingRow } from '../services/export/pdf.ts'
@@ -439,14 +440,28 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
       const allTxns = app.transactions.list(user.tenantId)
       const transactionsById = new Map(allTxns.map((t) => [t.id, t]))
 
+      // Earliest disposal per instrument in this year — the history only needs
+      // to reach back far enough to evidence the first of them.
+      const earliestDisposalByInstrument = new Map<number, string>()
+      for (const d of disposals) {
+        const current = earliestDisposalByInstrument.get(d.instrumentId)
+        if (!current || d.disposalDate < current) {
+          earliestDisposalByInstrument.set(d.instrumentId, d.disposalDate)
+        }
+      }
+
+      // Pool history is evidence for pool-matched disposals, so an instrument
+      // with no disposals this year contributes nothing and is left out.
       const poolSnapshotsByInstrument = new Map<number, PoolSnapshot[]>()
-      for (const instrument of allInstruments) {
-        const instrumentTxns = allTxns.filter((t) => t.instrumentId === instrument.id)
+      for (const [instrumentId, earliestDisposal] of earliestDisposalByInstrument) {
+        const instrumentTxns = allTxns.filter((t) => t.instrumentId === instrumentId)
         if (instrumentTxns.length === 0) continue
-        const history = matchDisposals(instrumentTxns).history.filter(
-          (s) => s.date <= configRow.end_date,
+        const history = scopePoolHistoryForReport(
+          matchDisposals(instrumentTxns).history,
+          earliestDisposal,
+          configRow.end_date,
         )
-        if (history.length > 0) poolSnapshotsByInstrument.set(instrument.id, history)
+        if (history.length > 0) poolSnapshotsByInstrument.set(instrumentId, history)
       }
 
       const computations = buildDisposalComputations(

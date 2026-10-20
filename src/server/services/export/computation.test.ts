@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { Instrument, Transaction } from '../../../shared/types.ts'
 import type { CgtDisposalRecord, PoolSnapshot } from '../tax/matching.ts'
-import { buildDisposalComputations, formatComputationsText } from './computation.ts'
+import {
+  buildDisposalComputations,
+  formatComputationsText,
+  scopePoolHistoryForReport,
+} from './computation.ts'
 
 const ACME: Instrument = {
   id: 1,
@@ -183,6 +187,71 @@ describe('buildDisposalComputations', () => {
     ])
     const out = buildDisposalComputations(records, txns, instruments, new Map())
     expect(out.map((c) => c.disposalDate)).toEqual(['2025-08-15', '2025-10-01'])
+  })
+})
+
+describe('scopePoolHistoryForReport', () => {
+  function snap(date: string, quantity: string, txnType = 'BUY'): PoolSnapshot {
+    return { txnId: 0, date, txnType, quantity, costGbp: '0', avgCostGbp: '0', matchTypes: [] }
+  }
+
+  it('starts from the point the pool was last emptied before the first disposal', () => {
+    const history = [
+      snap('2023-01-01', '100'),
+      snap('2023-06-01', '0', 'SELL'),
+      snap('2024-02-01', '50'),
+      snap('2024-08-01', '120'),
+      snap('2025-09-01', '20', 'SELL'),
+    ]
+    const scoped = scopePoolHistoryForReport(history, '2025-09-01', '2026-04-05')
+    // The emptying row is kept as the opening marker; nothing before it.
+    expect(scoped.map((s) => s.date)).toEqual([
+      '2023-06-01',
+      '2024-02-01',
+      '2024-08-01',
+      '2025-09-01',
+    ])
+  })
+
+  it('does not treat a pool left holding a fraction as emptied', () => {
+    // A sale that leaves a residue has not closed the position, so the history
+    // keeps reaching back rather than resetting there — the residue stays
+    // visible in the report instead of being scoped past.
+    const history = [
+      snap('2023-01-01', '500'),
+      snap('2023-09-20', '0.25', 'SELL'),
+      snap('2024-02-01', '400'),
+      snap('2025-08-15', '0', 'SELL'),
+    ]
+    const scoped = scopePoolHistoryForReport(history, '2025-08-15', '2026-04-05')
+    expect(scoped[0]!.date).toBe('2023-01-01')
+    expect(scoped).toHaveLength(4)
+  })
+
+  it('does not treat a genuine small fractional holding as empty', () => {
+    const history = [
+      snap('2023-01-01', '100'),
+      snap('2023-06-01', '0.5', 'SELL'),
+      snap('2024-02-01', '60'),
+    ]
+    const scoped = scopePoolHistoryForReport(history, '2024-06-01', '2026-04-05')
+    expect(scoped).toHaveLength(3)
+  })
+
+  it('excludes events after the end of the tax year', () => {
+    const history = [snap('2025-05-01', '100'), snap('2026-05-01', '150')]
+    const scoped = scopePoolHistoryForReport(history, '2025-06-01', '2026-04-05')
+    expect(scoped.map((s) => s.date)).toEqual(['2025-05-01'])
+  })
+
+  it('keeps the whole in-year history when the pool was never emptied', () => {
+    const history = [
+      snap('2020-01-01', '100'),
+      snap('2021-01-01', '200'),
+      snap('2022-01-01', '150'),
+    ]
+    const scoped = scopePoolHistoryForReport(history, '2022-01-01', '2026-04-05')
+    expect(scoped).toHaveLength(3)
   })
 })
 
