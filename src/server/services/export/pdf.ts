@@ -46,7 +46,13 @@ function fmt(v: string | null | undefined, decimals = 2): string {
   if (v == null) return '—'
   const n = parseFloat(v)
   if (Number.isNaN(n)) return v
-  return `£${n.toLocaleString('en-GB', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`
+  const abs = Math.abs(n).toLocaleString('en-GB', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  })
+  // Parentheses rather than a minus sign, matching the text renderer and the
+  // convention a reviewer expects on a tax computation.
+  return n < 0 ? `(£${abs})` : `£${abs}`
 }
 
 function fmtNum(v: string | null | undefined): string {
@@ -56,6 +62,23 @@ function fmtNum(v: string | null | undefined): string {
 
 const MARGIN = 50
 const COL_GAP = 10
+
+/**
+ * Shorten text to fit a column, measured in the font currently set.
+ *
+ * Necessary because the cell render runs with `lineBreak: false` — pdfkit will
+ * otherwise draw the full string straight past the column edge and over its
+ * neighbour. Truncating here keeps that impossible for any input, rather than
+ * relying on every label happening to be short enough.
+ */
+function clip(doc: InstanceType<typeof PDFDocument>, text: string, width: number): string {
+  if (doc.widthOfString(text) <= width) return text
+  let out = text
+  while (out.length > 1 && doc.widthOfString(`${out}…`) > width) {
+    out = out.slice(0, -1)
+  }
+  return `${out}…`
+}
 
 function tableRow(
   doc: InstanceType<typeof PDFDocument>,
@@ -67,15 +90,96 @@ function tableRow(
   doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(9)
   let x = MARGIN
   for (let i = 0; i < cols.length; i++) {
-    doc.text(cols[i] ?? '', x, y, { width: widths[i]!, ellipsis: true, lineBreak: false })
+    // Reset the cursor for every cell. `ellipsis` engages pdfkit's line
+    // wrapper, which advances its own cursor as it renders, so later cells in
+    // the same row drift off the baseline of the earlier ones even though all
+    // are passed the same y. Writing y back each time pins the whole row.
+    doc.x = x
+    doc.y = y
+    doc.text(clip(doc, cols[i] ?? '', widths[i]!), x, y, { width: widths[i]!, lineBreak: false })
     x += widths[i]! + COL_GAP
   }
+  doc.y = y
+}
+
+const ROW_HEIGHT = 14
+// A4 is 841.89pt tall; with MARGIN top and bottom the last baseline that still
+// fits a row is comfortably under this.
+const PAGE_BOTTOM = 770
+
+/**
+ * Draw table rows at explicitly tracked y positions.
+ *
+ * A row is several independently positioned cells, and pdfkit's implicit
+ * cursor is not reliable across them: a row drawn near the page boundary can
+ * end up with its leading cells on one page and the rest on the next, which
+ * reads as one row's columns overlapping its neighbour. Tracking y here keeps
+ * every cell of a row on one baseline and only breaks pages between rows.
+ */
+function tableRows(
+  doc: InstanceType<typeof PDFDocument>,
+  widths: number[],
+  rows: string[][],
+): void {
+  let y = doc.y
+  for (const cols of rows) {
+    if (y > PAGE_BOTTOM) {
+      doc.addPage()
+      y = doc.y
+    }
+    tableRow(doc, y, cols, widths)
+    y += ROW_HEIGHT
+  }
+  doc.y = y
+}
+
+function tableHeader(
+  doc: InstanceType<typeof PDFDocument>,
+  widths: number[],
+  cols: string[],
+): void {
+  if (doc.y > PAGE_BOTTOM - ROW_HEIGHT) doc.addPage()
+  tableRow(doc, doc.y, cols, widths, true)
+  doc.y += ROW_HEIGHT
 }
 
 function sectionTitle(doc: InstanceType<typeof PDFDocument>, title: string): void {
   doc.moveDown(0.5)
   doc.font('Helvetica-Bold').fontSize(12).text(title)
   doc.moveDown(0.3)
+}
+
+// Raw enum names overflow the narrow table columns, and pdfkit will not
+// ellipsise with lineBreak disabled — it just draws past the column edge into
+// the next one. Shorten at source rather than relying on truncation.
+const TXN_TYPE_LABEL: Record<string, string> = {
+  BUY: 'Buy',
+  SELL: 'Sell',
+  RSU_VEST: 'RSU vest',
+  ESPP_PURCHASE: 'ESPP',
+  TRANSFER_IN: 'Transfer in',
+  TRANSFER_OUT: 'Transfer out',
+  DRIP: 'DRIP',
+  SPLIT: 'Split',
+  UNSPLIT: 'Unsplit',
+  CAPRETURN: 'Cap return',
+  RIGHTS_ISSUE: 'Rights',
+}
+
+const MATCH_TYPE_LABEL: Record<string, string> = {
+  'same-day': 'Same day',
+  '30-day': '30 day',
+  's104-pool': 'S104',
+}
+
+function txnTypeLabel(t: string): string {
+  return TXN_TYPE_LABEL[t] ?? t
+}
+
+function matchTypesLabel(matchTypes: string[]): string {
+  const unique = [...new Set(matchTypes)]
+  if (unique.length === 0) return '—'
+  return unique.map((m) => MATCH_TYPE_LABEL[m] ?? m).join(' + ')
 }
 
 /** Narrow, indented body text used for computation workings. */
@@ -172,25 +276,18 @@ export async function generateAnnualReportPdf(opts: {
     sectionTitle(doc, '1. Current Holdings')
 
     const hWidths = [60, 70, 90, 90, 100]
-    tableRow(
+    tableHeader(doc, hWidths, ['Ticker', 'Shares', 'Cost (£)', 'Value (£)', 'Unrealised G/L (£)'])
+    tableRows(
       doc,
-      doc.y,
-      ['Ticker', 'Shares', 'Cost (£)', 'Value (£)', 'Unrealised G/L (£)'],
       hWidths,
-      true,
+      holdings.map((h) => [
+        h.ticker,
+        fmtNum(h.quantity),
+        fmt(h.costGbp),
+        fmt(h.valueGbp),
+        fmt(h.unrealisedGainGbp),
+      ]),
     )
-    doc.moveDown(0.3)
-
-    for (const h of holdings) {
-      if (doc.y > 740) doc.addPage()
-      tableRow(
-        doc,
-        doc.y,
-        [h.ticker, fmtNum(h.quantity), fmt(h.costGbp), fmt(h.valueGbp), fmt(h.unrealisedGainGbp)],
-        hWidths,
-      )
-      doc.moveDown(0.25)
-    }
 
     // ── Disposal computations ────────────────────────────────────────────────
     // HMRC requires a separate computation per disposal showing how the gain
@@ -304,35 +401,29 @@ export async function generateAnnualReportPdf(opts: {
     doc.addPage()
     sectionTitle(doc, '3. Realised Disposals — match detail')
 
-    const dWidths = [55, 75, 55, 65, 85, 85, 70]
-    tableRow(
+    const dWidths = [55, 60, 70, 60, 85, 85, 70]
+    tableHeader(doc, dWidths, [
+      'Date',
+      'Ticker',
+      'Match',
+      'Shares',
+      'Proceeds (£)',
+      'Cost (£)',
+      'Gain (£)',
+    ])
+    tableRows(
       doc,
-      doc.y,
-      ['Date', 'Ticker', 'Match', 'Shares', 'Proceeds (£)', 'Cost (£)', 'Gain (£)'],
       dWidths,
-      true,
+      disposals.map((d) => [
+        d.disposalDate,
+        instrumentsById.get(d.instrumentId)?.ticker ?? '',
+        matchTypesLabel([d.matchType]),
+        fmtNum(d.quantity),
+        fmt(d.proceedsGbp),
+        fmt(d.allowableCostGbp),
+        fmt(d.gainGbp),
+      ]),
     )
-    doc.moveDown(0.3)
-
-    for (const d of disposals) {
-      if (doc.y > 740) doc.addPage()
-      const instrument = instrumentsById.get(d.instrumentId)
-      tableRow(
-        doc,
-        doc.y,
-        [
-          d.disposalDate,
-          instrument?.ticker ?? '',
-          d.matchType,
-          fmtNum(d.quantity),
-          fmt(d.proceedsGbp),
-          fmt(d.allowableCostGbp),
-          fmt(d.gainGbp),
-        ],
-        dWidths,
-      )
-      doc.moveDown(0.25)
-    }
 
     // ── S104 pool history ────────────────────────────────────────────────────
     // Makes every pooled average cost used above traceable to the acquisitions
@@ -348,48 +439,49 @@ export async function generateAnnualReportPdf(opts: {
         .font('Helvetica')
         .fontSize(8)
         .text(
-          'Running pool state after each event affecting it, up to the end of the tax year. Pool cost ' +
-            'is inclusive of incidental acquisition costs. A disposal matched same-day or under the ' +
-            '30-day rule leaves the pool unchanged, since those shares are identified with a specific ' +
-            'acquisition rather than the pool.',
+          'Running pool state after each event affecting it. Shown only for instruments disposed of ' +
+            'in this tax year, and only from the point the pool was last fully disposed of before the ' +
+            "year's first disposal — earlier history cannot affect these figures, because closing the " +
+            'pool resets the pooled cost. Pool cost is inclusive of incidental acquisition costs. A ' +
+            'disposal matched same-day or under the 30-day rule leaves the pool unchanged, since those ' +
+            'shares are identified with a specific acquisition rather than the pool.',
           { width: 495 },
         )
       doc.moveDown(0.5)
 
-      const pWidths = [60, 70, 55, 80, 85, 85]
+      const pWidths = [60, 62, 72, 78, 85, 78]
       for (const [instrumentId, snapshots] of poolInstruments) {
-        if (doc.y > 680) doc.addPage()
+        if (doc.y > 660) doc.addPage()
         const instrument = instrumentsById.get(instrumentId)
+        const headingY = doc.y
         doc
           .font('Helvetica-Bold')
           .fontSize(10)
-          .text(`${instrument?.ticker ?? instrumentId}`, MARGIN, doc.y)
-        doc.moveDown(0.2)
-        tableRow(
+          .text(`${instrument?.ticker ?? instrumentId}`, MARGIN, headingY, { lineBreak: false })
+        // Advance explicitly: the heading shares its x with the first column, so
+        // relying on the implicit cursor risks the column header landing on the
+        // same baseline and colliding with it.
+        doc.y = headingY + 20
+        tableHeader(doc, pWidths, [
+          'Date',
+          'Event',
+          'Match',
+          'Pool shares',
+          'Pool cost (£)',
+          'Avg cost (£)',
+        ])
+        tableRows(
           doc,
-          doc.y,
-          ['Date', 'Event', 'Match', 'Pool shares', 'Pool cost (£)', 'Avg cost (£)'],
           pWidths,
-          true,
+          snapshots.map((s) => [
+            s.date,
+            txnTypeLabel(s.txnType),
+            matchTypesLabel(s.matchTypes),
+            fmtNum(s.quantity),
+            fmt(s.costGbp),
+            fmt(s.avgCostGbp, 4),
+          ]),
         )
-        doc.moveDown(0.3)
-        for (const s of snapshots) {
-          if (doc.y > 760) doc.addPage()
-          tableRow(
-            doc,
-            doc.y,
-            [
-              s.date,
-              s.txnType,
-              [...new Set(s.matchTypes)].join('+') || '—',
-              fmtNum(s.quantity),
-              fmt(s.costGbp),
-              fmt(s.avgCostGbp, 4),
-            ],
-            pWidths,
-          )
-          doc.moveDown(0.25)
-        }
         doc.moveDown(0.6)
       }
     }
@@ -400,32 +492,26 @@ export async function generateAnnualReportPdf(opts: {
       sectionTitle(doc, '5. Dividend Income')
 
       const divWidths = [65, 60, 80, 90, 80, 70]
-      tableRow(
+      tableHeader(doc, divWidths, [
+        'Date',
+        'Ticker',
+        'Gross (£)',
+        'Withholding (£)',
+        'Net (£)',
+        'FTCR (£)',
+      ])
+      tableRows(
         doc,
-        doc.y,
-        ['Date', 'Ticker', 'Gross (£)', 'Withholding (£)', 'Net (£)', 'FTCR (£)'],
         divWidths,
-        true,
+        dividends.map((div) => [
+          div.txnDate,
+          div.ticker,
+          fmt(div.grossGbp),
+          fmt(div.withholdingGbp),
+          fmt(div.netGbp),
+          fmt(div.ftcrGbp),
+        ]),
       )
-      doc.moveDown(0.3)
-
-      for (const div of dividends) {
-        if (doc.y > 740) doc.addPage()
-        tableRow(
-          doc,
-          doc.y,
-          [
-            div.txnDate,
-            div.ticker,
-            fmt(div.grossGbp),
-            fmt(div.withholdingGbp),
-            fmt(div.netGbp),
-            fmt(div.ftcrGbp),
-          ],
-          divWidths,
-        )
-        doc.moveDown(0.25)
-      }
     }
 
     // ── Liability breakdown ──────────────────────────────────────────────────

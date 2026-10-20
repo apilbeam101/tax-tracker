@@ -190,6 +190,38 @@ export function buildDisposalComputations(
   return computations
 }
 
+/**
+ * Narrow a pool history to the part that evidences a given tax year's
+ * disposals: everything after the pool was last emptied before the year's
+ * earliest disposal, up to the end of the year.
+ *
+ * The snapshot that emptied the pool is kept as the opening row, so the reader
+ * can see the reported run genuinely starts from a closed position rather than
+ * from an arbitrary cut.
+ *
+ * "Emptied" means exactly zero. A pool left holding a fraction has not been
+ * closed, so the history keeps reaching further back — which is the correct
+ * reading, and leaves the anomaly visible in the report rather than scoping
+ * past it.
+ */
+export function scopePoolHistoryForReport(
+  history: PoolSnapshot[],
+  earliestDisposalDate: string,
+  taxYearEnd: string,
+): PoolSnapshot[] {
+  const inScope = history.filter((s) => s.date <= taxYearEnd)
+
+  let start = 0
+  for (let i = 0; i < inScope.length; i++) {
+    const s = inScope[i]!
+    if (s.date >= earliestDisposalDate) break
+    // Strictly before: the disposal being evidenced may itself have emptied the
+    // pool, and that row closes the run rather than opening it.
+    if (new Big(s.quantity).eq(0)) start = i
+  }
+  return inScope.slice(start)
+}
+
 function poolBeforeDisposal(
   poolSnapshotsByInstrument: Map<number, PoolSnapshot[]>,
   record: CgtDisposalRecord,
