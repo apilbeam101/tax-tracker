@@ -16,6 +16,10 @@
 import type { FastifyPluginAsync } from 'fastify'
 import type { CreateTransactionBody, Instrument } from '../../shared/types.ts'
 import { formatCgtCalculator, toCgtCalculatorRows } from '../services/export/cgtcalculator.ts'
+import {
+  buildDisposalComputations,
+  formatComputationsText,
+} from '../services/export/computation.ts'
 import { disposalsToCsv, transactionsToCsv } from '../services/export/csv.ts'
 import type { DividendRow, HoldingRow } from '../services/export/pdf.ts'
 import { generateAnnualReportPdf } from '../services/export/pdf.ts'
@@ -23,7 +27,8 @@ import type { ColumnMapping, MappedRow } from '../services/import/csv-mapper.ts'
 import { mapCsvToTransactions, toCreateBody, validRows } from '../services/import/csv-mapper.ts'
 import { buildCgtSummary } from '../services/tax/cgt_summary.ts'
 import { computeDividendTax } from '../services/tax/dividends.ts'
-import { taxYearForDate } from '../services/tax/matching.ts'
+import type { PoolSnapshot } from '../services/tax/matching.ts'
+import { matchDisposals, taxYearForDate } from '../services/tax/matching.ts'
 import { linkRealisedProjection, recalcInstrument } from '../services/tax/recalc.ts'
 import { applyAutoWithholding } from '../services/tax/withholding.ts'
 
@@ -352,7 +357,7 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
 
   // ── GET /api/export/report ────────────────────────────────────────────────
   // Generate annual PDF report.  ?taxYear=2025-26&income=0
-  app.get<{ Querystring: { taxYear?: string; income?: string } }>(
+  app.get<{ Querystring: { taxYear?: string; income?: string; format?: string } }>(
     '/export/report',
     async (req, reply) => {
       const user = req.session.user!
@@ -428,11 +433,47 @@ export const importExportRoutes: FastifyPluginAsync = async (app) => {
         }
       })
 
+      // Every transaction, not just the year's: a disposal can be matched to an
+      // acquisition outside the tax year (30-day rule straddling 5 April), and
+      // the pool average depends on the entire acquisition history.
+      const allTxns = app.transactions.list(user.tenantId)
+      const transactionsById = new Map(allTxns.map((t) => [t.id, t]))
+
+      const poolSnapshotsByInstrument = new Map<number, PoolSnapshot[]>()
+      for (const instrument of allInstruments) {
+        const instrumentTxns = allTxns.filter((t) => t.instrumentId === instrument.id)
+        if (instrumentTxns.length === 0) continue
+        const history = matchDisposals(instrumentTxns).history.filter(
+          (s) => s.date <= configRow.end_date,
+        )
+        if (history.length > 0) poolSnapshotsByInstrument.set(instrument.id, history)
+      }
+
+      const computations = buildDisposalComputations(
+        disposals,
+        transactionsById,
+        instrumentsById,
+        poolSnapshotsByInstrument,
+      )
+
+      // HMRC accepts the computation either as an attachment or pasted into
+      // "Any other information", so the same model is offered as plain text.
+      if (req.query.format === 'txt') {
+        reply.header('Content-Type', 'text/plain; charset=utf-8')
+        reply.header(
+          'Content-Disposition',
+          `attachment; filename="cgt-computations-${taxYear}.txt"`,
+        )
+        return reply.send(formatComputationsText(computations, taxYear))
+      }
+
       const pdfBuffer = await generateAnnualReportPdf({
         taxYear,
         summary,
         holdings,
         disposals,
+        computations,
+        poolSnapshotsByInstrument,
         instrumentsById,
         dividends,
         generatedAt: new Date().toISOString().slice(0, 10),
