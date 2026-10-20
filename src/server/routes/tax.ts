@@ -4,7 +4,7 @@ import { buildCgtSummary } from '../services/tax/cgt_summary.ts'
 import { computeDividendTax } from '../services/tax/dividends.ts'
 import { runTaxEngine, runTaxEngineForInstrument } from '../services/tax/engine.ts'
 import { computeEsppPurchaseIncome } from '../services/tax/espp.ts'
-import { taxYearForDate } from '../services/tax/matching.ts'
+import { matchDisposals, taxYearForDate } from '../services/tax/matching.ts'
 
 interface TaxYearConfigRow {
   tax_year: string
@@ -363,81 +363,12 @@ export const taxRoutes: FastifyPluginAsync = async (app) => {
       const instrumentId = parseInt(req.query.instrumentId, 10)
       const txns = app.transactions.list(user.tenantId, { instrumentId })
 
-      // Replay transactions in chronological order, capturing pool state after each
-      const sorted = [...txns].sort((a, b) => {
-        if (a.txnDate < b.txnDate) return -1
-        if (a.txnDate > b.txnDate) return 1
-        return a.id - b.id
-      })
-
-      const {
-        addToPool,
-        disposeFromPool,
-        emptyPool,
-        poolAvgCost,
-        applyStockSplit,
-        applyCapReturn,
-      } = await import('../services/tax/pool.ts')
-      const { default: Big } = await import('big.js')
-      let pool = emptyPool()
-      const history: {
-        txnId: number
-        date: string
-        txnType: string
-        quantity: string
-        costGbp: string
-        avgCostGbp: string
-      }[] = []
-      for (const txn of sorted) {
-        const qty = txn.quantity
-        switch (txn.txnType) {
-          case 'BUY':
-          case 'RSU_VEST':
-          case 'ESPP_PURCHASE':
-          case 'TRANSFER_IN':
-          case 'DRIP': {
-            // Use the same cost the engine uses: unitPriceGbp × quantity
-            const costGbp = txn.unitPriceGbp
-              ? new Big(txn.unitPriceGbp).times(qty).toFixed(8)
-              : (txn.totalGbp ?? '0')
-            pool = addToPool(pool, qty, costGbp)
-            break
-          }
-          case 'SELL':
-          case 'TRANSFER_OUT': {
-            const result = disposeFromPool(pool, qty)
-            pool = result.pool
-            break
-          }
-          case 'SPLIT': {
-            if (txn.splitRatio) pool = applyStockSplit(pool, txn.splitRatio)
-            continue
-          }
-          case 'UNSPLIT': {
-            if (txn.splitRatio) {
-              const [num, den] = txn.splitRatio.split('/')
-              pool = applyStockSplit(pool, `${den}/${num}`)
-            }
-            continue
-          }
-          case 'CAPRETURN': {
-            if (txn.capreturnsPerShareGbp) pool = applyCapReturn(pool, txn.capreturnsPerShareGbp)
-            continue
-          }
-          default:
-            continue
-        }
-        history.push({
-          txnId: txn.id,
-          date: txn.txnDate,
-          txnType: txn.txnType,
-          quantity: pool.quantity,
-          costGbp: pool.costGbp,
-          avgCostGbp: poolAvgCost(pool),
-        })
-      }
-
-      return history
+      // Derived from the matcher itself rather than replayed here. The previous
+      // local replay had no same-day or 30-day matching, so it disagreed with
+      // the engine by construction: every acquisition entered the pool in full
+      // and every disposal came out at the pool average, which silently
+      // mis-stated the running cost basis whenever either rule applied.
+      return matchDisposals(txns).history
     },
   )
 

@@ -22,7 +22,7 @@ describe('Tiingo provider — response parsing (real captured shape, sanitized)'
     mockFetchJson(200, loadFixture('tiingo-daily.json'))
     const provider = createTiingoProvider('test-key')
 
-    const result = await provider.getPrice('CSCO', 'USD', '2025-06-02')
+    const result = await provider.getPrice('ACME', 'USD', '2025-06-02')
     expect(result).toEqual({ priceDate: '2025-06-02', closePrice: '27.75', source: 'tiingo' })
   })
 
@@ -30,7 +30,7 @@ describe('Tiingo provider — response parsing (real captured shape, sanitized)'
     mockFetchJson(200, loadFixture('tiingo-daily.json'))
     const provider = createTiingoProvider('test-key')
 
-    const rows = await provider.getHistoricalPrices('CSCO', 'USD', '2025-06-02', '2025-06-04')
+    const rows = await provider.getHistoricalPrices('ACME', 'USD', '2025-06-02', '2025-06-04')
     const dates = rows.map((r) => r.priceDate)
     expect(dates).not.toContain('2025-06-03')
     expect(dates).toEqual(['2025-06-02', '2025-06-04'])
@@ -43,7 +43,7 @@ describe('Tiingo provider — response parsing (real captured shape, sanitized)'
     mockFetchJson(200, loadFixture('tiingo-daily.json'))
     const provider = createTiingoProvider('test-key')
 
-    const rows = await provider.getHistoricalPrices('CSCO', 'USD', '2025-06-04', '2025-06-04')
+    const rows = await provider.getHistoricalPrices('ACME', 'USD', '2025-06-04', '2025-06-04')
     const row = rows.find((r) => r.priceDate === '2025-06-04')
     expect(row).toEqual({ priceDate: '2025-06-04', closePrice: '56.1', source: 'tiingo' })
   })
@@ -57,7 +57,7 @@ describe('Tiingo provider — response parsing (real captured shape, sanitized)'
     mockFetchJson(200, loadFixture('tiingo-daily.json'))
     const provider = createTiingoProvider('test-key')
 
-    const rows = await provider.getHistoricalPrices('CSCO', 'USD', '2025-06-05', '2025-06-05')
+    const rows = await provider.getHistoricalPrices('ACME', 'USD', '2025-06-05', '2025-06-05')
     expect(rows.find((r) => r.priceDate === '2025-06-05')).toBeUndefined()
   })
 
@@ -65,8 +65,8 @@ describe('Tiingo provider — response parsing (real captured shape, sanitized)'
     mockFetchJson(200, loadFixture('tiingo-empty.json'))
     const provider = createTiingoProvider('test-key')
 
-    expect(await provider.getPrice('CSCO', 'USD', '2025-06-02')).toBeNull()
-    expect(await provider.getHistoricalPrices('CSCO', 'USD', '2025-06-01', '2025-06-05')).toEqual(
+    expect(await provider.getPrice('ACME', 'USD', '2025-06-02')).toBeNull()
+    expect(await provider.getHistoricalPrices('ACME', 'USD', '2025-06-01', '2025-06-05')).toEqual(
       [],
     )
   })
@@ -82,7 +82,7 @@ describe('Tiingo provider — response parsing (real captured shape, sanitized)'
     mockFetchJson(500, {})
     const provider = createTiingoProvider('test-key')
 
-    await expect(provider.getPrice('CSCO', 'USD', '2025-06-02')).rejects.toThrow('Tiingo HTTP 500')
+    await expect(provider.getPrice('ACME', 'USD', '2025-06-02')).rejects.toThrow('Tiingo HTTP 500')
   })
 
   it('requires an API key at construction time', () => {

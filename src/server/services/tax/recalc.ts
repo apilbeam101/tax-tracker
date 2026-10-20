@@ -80,6 +80,49 @@ export function recalcInstrument(
 }
 
 /**
+ * Re-run CGT matching for every instrument so persisted S104 pools and disposal
+ * records reflect the current matcher.
+ *
+ * Exists because pools written before the same-day ordering fix in `matching.ts`
+ * can hold phantom shares: when an acquisition sorted ahead of a same-day
+ * disposal, its full quantity entered the pool and the same-day-matched shares
+ * were never deducted, overstating both pool quantity and cost. Nothing in the
+ * stored pool identifies it as stale, so the only reliable repair is to
+ * recompute from the transactions, which are untouched by the bug.
+ *
+ * Idempotent — `runTaxEngineForInstrument` replaces rather than appends, so this
+ * is safe on every boot and self-heals any later matcher correction too.
+ * Per-instrument errors are logged and skipped so one unmatched disposal can't
+ * stop the server coming up.
+ */
+export function recalcAllInstruments(app: FastifyInstance): void {
+  const tenantIds = (
+    app.db.prepare('SELECT DISTINCT tenant_id FROM instrument').all() as unknown as {
+      tenant_id: number
+    }[]
+  ).map((r) => r.tenant_id)
+
+  for (const tenantId of tenantIds) {
+    for (const inst of app.instruments.list(tenantId)) {
+      try {
+        runTaxEngineForInstrument(
+          tenantId,
+          inst.id,
+          app.transactions,
+          app.cgtDisposals,
+          app.s104Pools,
+        )
+      } catch (err) {
+        app.log.warn(
+          { err, tenantId, instrumentId: inst.id, ticker: inst.ticker },
+          'startup pool recalc failed for instrument — its S104 pool and disposals are left as previously persisted',
+        )
+      }
+    }
+  }
+}
+
+/**
  * Link a newly-confirmed RSU vest / ESPP purchase to a pending Projections
  * entry scheduled for the same instrument within a tolerance window of the
  * transaction date, so it stops double-counting as a projected estimate on

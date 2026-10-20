@@ -9,9 +9,9 @@ function makeInstrument(overrides: Partial<Instrument> = {}): Instrument {
   return {
     id: 1,
     tenantId: 1,
-    ticker: 'CSCO',
+    ticker: 'ACME',
     isin: null,
-    name: 'Cisco Systems',
+    name: 'Acme Corporation',
     currency: 'USD',
     exchange: 'NASDAQ',
     instrumentType: 'equity',
