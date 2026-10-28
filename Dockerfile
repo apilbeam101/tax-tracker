@@ -16,10 +16,17 @@ RUN npm run build
 FROM node:24-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+# The OS-default data directory ($HOME/.local/share) doesn't exist for the
+# service user, so a bare `docker run -v vol:/app/data` must be pointed here.
+ENV DATA_DIR=/app/data
+ENV LOG_LEVEL=warn
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=builder /app/dist ./dist
+# After the dependency layers so a new commit doesn't invalidate them.
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=$GIT_COMMIT
 
 # Fixed non-zero UID/GID (not the image's default `node` user) so it's
 # predictable for volume permissions. Owns /app/data up front -- this only

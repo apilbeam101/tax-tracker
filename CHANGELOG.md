@@ -18,8 +18,21 @@ All notable changes to this project are documented in this file. Format follows 
 - Fixture-based tests for the Tiingo, HMRC monthly CSV, and Frankfurter response parsers, which previously had thin or no coverage of their actual parsing logic.
 - Docker packaging (`Dockerfile`, `.dockerignore`, `deploy/docker-compose.yml`, a new "Docker" section in the README) as an additional self-hosting option alongside the existing bare-Node/reverse-proxy setup. Non-root UID, `read_only` root filesystem with a `tmpfs` `/tmp` and a bind-mounted `/app/data`, `init: true` for correct SIGTERM handling, and the published port bound to `127.0.0.1` only (same posture as the non-Docker reverse-proxy setup).
 - `PRAGMA temp_store = MEMORY` (`src/server/db/database.ts`) so SQLite never needs a writable temp directory for large queries, regardless of deployment mode.
+- Secret settings (`SESSION_SECRET`, `ENCRYPTION_KEY`, `TIINGO_API_KEY`, `ALPHA_VANTAGE_API_KEY`) accept a `_FILE` variant for Docker secrets, Kubernetes secret volumes and systemd `LoadCredential=`. Setting both forms is a configuration error (`src/server/config/secrets.ts`).
+- `SECURE_COOKIES` (`auto` | `true` | `false`, default `auto`) controls the session cookie `Secure` flag. `auto` marks it Secure only when the request arrived over HTTPS (`src/server/session.ts`).
+- `TRUST_PROXY` (`true`, `false`, or a comma-separated list of IPs, CIDRs or `loopback`/`linklocal`/`uniquelocal`) is passed to Fastify so reverse-proxy deployments see the original protocol. Numeric hop counts are rejected.
+- Per-user data directory resolution (`src/server/config/paths.ts`): `DB_PATH`, then `DATA_DIR`, then an existing `./data/taxtracker.db`, otherwise the OS default (`%APPDATA%\tax-tracker`, `~/Library/Application Support/tax-tracker`, or `$XDG_DATA_HOME`/`~/.local/share/tax-tracker`). The resolved path is printed at startup, and the `scripts/` utilities use the same resolution.
+- `LOG_LEVEL` (default `info`), validated at startup.
+- `GET /health` also returns `version` and `commit` (from `GIT_COMMIT`, default `unknown`). The Dockerfile accepts a `GIT_COMMIT` build argument and sets `DATA_DIR=/app/data` and `LOG_LEVEL=warn`.
 
 ### Changed
+
+- `SESSION_SECRET` and `ENCRYPTION_KEY` are rejected at startup if they are `CHANGE_ME` placeholders, hex strings under 64 characters, or other strings under 32 characters. `ENCRYPTION_KEY` is now optional. A `.env` copied unedited from `.env.example` will fail to start until the placeholders are replaced.
+- The cookie `Secure` flag no longer follows `NODE_ENV=production`. Deployments behind a TLS proxy should set `TRUST_PROXY` (for example `loopback`, or `uniquelocal` for Docker) so `auto` detects HTTPS.
+- A fresh install with no `DB_PATH` or `DATA_DIR` stores its database in the OS data directory rather than `./data`. An existing `./data/taxtracker.db` is still used.
+- Logging level comes from `LOG_LEVEL` instead of `NODE_ENV`, so a non-Docker production start now logs at `info` by default. `pino-pretty` is used only when stdout is a TTY and the module resolves, which fixes a crash on production installs without dev dependencies.
+- Log redaction now also scrubs `body` fields and `passphrase`, `newPassphrase`, `recoveryKey`, `dataKey`, `dek` and `wrappedDek`, at the top level and one level deep.
+- The client bundle path is resolved from the package root rather than `process.cwd()`.
 
 - Linting moved from ESLint (which had no working config — `npm run lint` failed outright) to Biome. `typescript-eslint`'s peer dependency doesn't yet support this project's TypeScript `^7`, and Biome has no such constraint.
 - `npm run typecheck` now covers `scripts/` in addition to `src/server`/`src/shared` (previously ungated — two pre-existing type errors there are fixed).

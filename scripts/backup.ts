@@ -1,13 +1,14 @@
 /**
  * Database backup utility.
  * Usage: npm run backup
- * Copies the live DB file to data/backups/taxtracker-YYYY-MM-DDTHH-MM-SS.db
+ * Copies the live DB file to <data dir>/backups/taxtracker-YYYY-MM-DDTHH-MM-SS.db
  */
 import { copyFileSync, mkdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
+import { resolveDataPaths } from '../src/server/config/paths.ts'
 
-const dbPath = process.env.DB_PATH ?? './data/taxtracker.db'
-const backupDir = join(dirname(dbPath), 'backups')
+const { dbPath, dataDir } = resolveDataPaths()
+const backupDir = join(dataDir, 'backups')
 mkdirSync(backupDir, { recursive: true })
 
 const ts = new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '')

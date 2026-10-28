@@ -10,12 +10,12 @@ Target install paths, in order of expected audience size:
 |---|---|---|---|
 | Laptop user, macOS | `curl -fsSL …/install.sh \| sh` | Login item, or `tax-tracker` | `tax-tracker upgrade` / re-run installer |
 | Laptop user, Windows | `irm …/install.ps1 \| iex` | Login task, or `tax-tracker` | same |
-| Has Node 24 already | `npx tax-tracker` | same command | `npx tax-tracker@latest` |
+| Has Node 24 already | `npx uk-tax-tracker` | same command | `npx uk-tax-tracker@latest` |
 | Home server / NAS | `docker compose up -d` (published image) | always-on | `docker compose pull && up -d` |
 | Kubernetes | `kubectl apply -k deploy/kubernetes` | single replica + PVC | bump image tag |
-| Linux server, no containers | npm global install + systemd unit | always-on | `npm i -g tax-tracker@latest` |
+| Linux server, no containers | npm global install + systemd unit | always-on | `npm i -g uk-tax-tracker@latest` |
 
-Each phase follows the phased review loop: implement, Opus review against the real diff, fix, update memory and CLAUDE.md, then stop for a commit decision. Commit messages, CHANGELOG entries and user-facing doc wording are approved by the maintainer before every commit or push.
+Commit messages, CHANGELOG entries and user-facing doc wording are approved by the maintainer before every commit or push.
 
 ---
 
@@ -23,7 +23,7 @@ Each phase follows the phased review loop: implement, Opus review against the re
 
 These changes help every install path, so they come first. No packaging yet.
 
-1. **Resolve assets from the package, not the cwd.** [app.ts:31](../../src/server/app.ts#L31) resolves `dist/client` from `process.cwd()`. Replace it with a `packageRoot()` helper that walks up from `import.meta.url` to the nearest `package.json`. That works the same from `src/server` (tsx) and from `dist/server` (compiled). Use it for migrations too, so [database.ts](../../src/server/db/database.ts) and `app.ts` share one rule.
+1. **Resolve assets from the package, not the cwd.** [app.ts:31](../../src/server/app.ts#L31) resolves `dist/client` from `process.cwd()`. Replace it with a `packageRoot()` helper that walks up from `import.meta.url` to the nearest `package.json`. That works the same from `src/server` (tsx) and from `dist/server` (compiled). Migrations keep resolving relative to [database.ts](../../src/server/db/database.ts) itself, which is already correct under both tsx and the compiled build (`build:server` copies them into `dist/server/db/migrations`).
 2. **Per-user data directory.** New `config/paths.ts`, used in this order:
    - `DB_PATH` / `DATA_DIR` env vars, or the `--data-dir` flag (Phase 3)
    - `./data` if it already contains `taxtracker.db`, so existing source installs keep working
@@ -133,7 +133,7 @@ Tests:
 - an interrupted upgrade leaves the DB in its original readable state
 - existing tax-engine and computation tests pass unchanged through the stores
 
-Open decision: should self-configured mode be the default for `npx` / global installs, or always need `init` first? Recommendation: default on, because a one-command start is the point.
+Self-configured mode is the default for `npx` / global installs, because a one-command start is the point.
 
 ## Phase 3: CLI and npm package
 
@@ -145,7 +145,7 @@ Open decision: should self-configured mode be the default for `npx` / global ins
   - `keys add-unattended`, `keys remove-unattended`, `keys rotate`: manage key slots and rotate the DEK. Each needs an unlock first, and rotation runs offline.
   - `info`: version, data dir, config mode, unlock mode, DB size, last backup.
   - `doctor`: checks the Node version, data-dir permissions, DB `integrity_check`, port availability, secret validity and key-slot integrity. It also confirms that `config.json` contains no key material and that the unattended key file isn't inside the data dir. It never prints or asks for key material. This is the first thing a support issue would ask for.
-- Rename the package to `tax-tracker` (free on npm as of 2026-10-26) or `@apilbeam101/tax-tracker`. Open decision; see below.
+- Rename the package to `uk-tax-tracker` (free on npm as of 2026-10-28). The `bin` name stays `tax-tracker`; `npx uk-tax-tracker` still works because it's the package's only bin.
 - `"files": ["dist", "LICENSE", "README.md"]`. Also move `pino-pretty` to `optionalDependencies` or leave it dev-only, given the Phase 1 fallback.
 - Port `scripts/check-pack-allowlist.ts` from the exporters. Required entries: `dist/server/cli.js`, `dist/server/main.js`, `dist/client/index.html`, `dist/server/db/migrations/001_core_schema.sql`. Run it in CI. It also guards against `.env` or `data/` ever reaching the tarball.
 - **Don't** port `check-no-native-addons.ts`, because `@node-rs/argon2` is a native addon. Instead, add a CI matrix job (`ubuntu`, `macos`, `windows`) that runs `npm pack`, installs the tarball into a clean dir, starts `tax-tracker --port 0` and probes `/health`. That proves the prebuilt argon2 binary resolves on each OS.
@@ -167,7 +167,7 @@ Two distinct things that users conflate, kept separate in the UI and docs:
 - Shared `services/backup/` module, used by the CLI, the API and the scheduler:
   - `createBackup(reason)` writes to `<dataDir>/backups/taxtracker-<ts>-<reason>.db`, then runs `PRAGMA integrity_check` on the copy.
   - Retention: keep the last N (default 14) plus every pre-migration backup.
-- **Automatic pre-migration backup:** [database.ts](../../src/server/db/database.ts) takes a backup before applying any pending migration to a non-empty DB. That's the safety net for `npx tax-tracker@latest`-style upgrades.
+- **Automatic pre-migration backup:** [database.ts](../../src/server/db/database.ts) takes a backup before applying any pending migration to a non-empty DB. That's the safety net for `npx uk-tax-tracker@latest`-style upgrades.
 - **Scheduled backups:** an optional in-process daily backup (`BACKUP_SCHEDULE=daily|off`, default `daily` in self-configured mode). This removes the cron instruction from the README for laptop users. Containers and Kubernetes can keep it on (the backups land on the volume) or use the CronJob below.
 - API and UI: `POST /api/backup` (create), `GET /api/backup` (list), `GET /api/backup/:name` (download). Add a "Backups" section to [ImportExport.svelte](../../src/client/src/routes/ImportExport.svelte).
 
@@ -256,7 +256,7 @@ Both scripts:
    - Windows: `winget install OpenJS.NodeJS.LTS`.
 
    Never silently upgrade an existing Node.
-2. `npm install -g tax-tracker@<pinned version>`.
+2. `npm install -g uk-tax-tracker@<pinned version>`.
 3. `tax-tracker init` (self-configured mode). Windows: run `icacls` on the data dir so only the current user can access it.
 4. Optional, prompted, default yes: start on login.
    - macOS: a launchd agent in `~/Library/LaunchAgents`.
@@ -278,12 +278,12 @@ Also:
 
 ---
 
-## Open decisions
+## Decisions
 
-1. **Package name:** `tax-tracker` (unscoped, short, generic) vs `@apilbeam101/tax-tracker` (scoped, no squatting risk, slightly longer `npx` command). Also `uk-tax-tracker`, which is more discoverable.
-2. **Self-configured default:** on by default for CLI/installer installs (recommended) or require explicit `init`.
-3. **Scheduled backups:** in-process daily by default (recommended) or off by default.
-4. **Order:** Phases 1–4 are code changes and 5–8 are mostly packaging and docs. Phase 5 could go earlier to get a published Docker image out quickly, but the image entrypoint and named-volume compose depend on Phases 1–3.
+1. **Package name:** `uk-tax-tracker`.
+2. **Self-configured mode:** on by default for CLI/installer installs.
+3. **Scheduled backups:** in-process daily by default.
+4. **Order:** Phases 1–8 in sequence. Nothing is pushed until the work is complete, so there's no reason to bring Phase 5 forward.
 
 ## Out of scope
 - Whole-file encryption (SQLCipher): `node:sqlite` doesn't support it.

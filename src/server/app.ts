@@ -1,12 +1,11 @@
 import { join } from 'node:path'
-import fastifyCookie from '@fastify/cookie'
 import fastifyCsrfProtection from '@fastify/csrf-protection'
 import fastifyHelmet from '@fastify/helmet'
 import fastifyRateLimit from '@fastify/rate-limit'
-import fastifySession from '@fastify/session'
 import fastifyStatic from '@fastify/static'
 import type { FastifyInstance } from 'fastify'
 import { config } from './config/env.ts'
+import { packageRoot } from './config/paths.ts'
 import { initDb } from './db/database.ts'
 import { errorHandler } from './errors.ts'
 import { createCgtDisposalStore } from './repositories/sqlite/CgtDisposalStore.ts'
@@ -24,11 +23,9 @@ import { createTiingoProvider } from './services/prices/tiingo.ts'
 import { createYahooProvider } from './services/prices/yahoo.ts'
 import { backfillRealisedProjections, recalcAllInstruments } from './services/tax/recalc.ts'
 import { backfillAutoWithholding } from './services/tax/withholding.ts'
+import { registerSession } from './session.ts'
 
-// Resolve client dist relative to the project root (process.cwd()), not the
-// source file location — avoids __dirname/import.meta.url resolution issues
-// when running via tsx directly vs compiled output.
-const CLIENT_DIST = join(process.cwd(), 'dist', 'client')
+const CLIENT_DIST = join(packageRoot(), 'dist', 'client')
 
 export async function buildApp(app: FastifyInstance): Promise<void> {
   app.setErrorHandler(errorHandler)
@@ -58,17 +55,7 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
   })
 
   // ── Cookies & sessions ──────────────────────────────────────────────────────
-  await app.register(fastifyCookie)
-  await app.register(fastifySession, {
-    secret: config.sessionSecret,
-    cookie: {
-      secure: config.isProduction,
-      httpOnly: true,
-      sameSite: 'lax',
-      maxAge: 8 * 60 * 60 * 1000, // 8h idle timeout
-    },
-    saveUninitialized: false,
-  })
+  await registerSession(app, { secret: config.sessionSecret, secureCookies: config.secureCookies })
 
   // ── CSRF protection ─────────────────────────────────────────────────────────
   await app.register(fastifyCsrfProtection, {
@@ -122,7 +109,7 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
   })
 
   // ── Routes ───────────────────────────────────────────────────────────────────
-  await app.register(healthRoute)
+  await app.register(healthRoute, { commit: config.gitCommit })
   await app.register(authRoutes, { prefix: '/api/auth' })
   await app.register(apiRoutes, { prefix: '/api' })
 }

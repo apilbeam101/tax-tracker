@@ -25,11 +25,9 @@
  * Requires ALPHA_VANTAGE_API_KEY in .env.
  */
 
-import { dirname, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { fileURLToPath } from 'node:url'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
+import { resolveDataPaths } from '../src/server/config/paths.ts'
+import { readSecret } from '../src/server/config/secrets.ts'
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
@@ -43,7 +41,12 @@ const commit = args.includes('--commit')
 const fromIdx = args.indexOf('--from')
 const fromDate: string | null = fromIdx !== -1 ? (args[fromIdx + 1] ?? null) : null
 
-const apiKey = process.env.ALPHA_VANTAGE_API_KEY
+const keyErrors: string[] = []
+const apiKey = readSecret('ALPHA_VANTAGE_API_KEY', process.env, keyErrors)
+if (keyErrors.length > 0) {
+  console.error(keyErrors.join('\n'))
+  process.exit(1)
+}
 if (!apiKey) {
   console.error('ALPHA_VANTAGE_API_KEY is not set in .env')
   process.exit(1)
@@ -51,8 +54,7 @@ if (!apiKey) {
 
 // ── DB setup ──────────────────────────────────────────────────────────────────
 
-const DB_PATH = process.env.DB_PATH ?? resolve(__dirname, '../data/taxtracker.db')
-const db = new DatabaseSync(DB_PATH)
+const db = new DatabaseSync(resolveDataPaths().dbPath)
 db.exec('PRAGMA foreign_keys = ON')
 
 const TENANT_ID = 1

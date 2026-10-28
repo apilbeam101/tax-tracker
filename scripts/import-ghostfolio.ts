@@ -25,11 +25,9 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { fileURLToPath } from 'node:url'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
+import { resolveDataPaths } from '../src/server/config/paths.ts'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,7 +85,7 @@ const raw = JSON.parse(readFileSync(resolve(filePath), 'utf-8')) as GhostfolioEx
 // Build tag-id → tag-name map
 const tagMap = new Map<string, string>(raw.tags.map((t) => [t.id, t.name.trim()]))
 
-const dbPath = process.env.DB_PATH ?? resolve(__dirname, '../data/taxtracker.db')
+const { dbPath } = resolveDataPaths()
 console.log(`Opening database: ${dbPath}`)
 const db = new DatabaseSync(dbPath)
 db.exec('PRAGMA foreign_keys = ON')

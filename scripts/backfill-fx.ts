@@ -16,12 +16,13 @@
 
 import { DatabaseSync } from 'node:sqlite'
 import Big from 'big.js'
+import { resolveDataPaths } from '../src/server/config/paths.ts'
 import { createFxRateStore } from '../src/server/repositories/sqlite/FxRateStore.ts'
 import { createFxService } from '../src/server/services/fx/index.ts'
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
-const DB_PATH = process.env.DB_PATH ?? './data/taxtracker.db'
+const { dbPath: DB_PATH } = resolveDataPaths()
 const FX_POLICY = (process.env.FX_RATE_POLICY ?? 'hmrc-monthly') as 'hmrc-monthly' | 'daily-spot'
 
 // ── Types for raw DB rows ─────────────────────────────────────────────────────

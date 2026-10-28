@@ -1,6 +1,8 @@
 # Before first run:
 #   1. cp ../.env.example ../.env  and fill in REAL secrets (not the CHANGE_ME
-#      placeholders -- buildConfig() only checks presence, not entropy).
+#      placeholders -- buildConfig() rejects them, and secrets that are too short).
+#      Behind a TLS reverse proxy, also set TRUST_PROXY=uniquelocal in .env so
+#      session cookies are marked Secure (see README "Reverse proxy").
 #   2. mkdir -p ../data && sudo chown -R 10001:10001 ../data
 #      The image's own /app/data (owned by uid 10001, see Dockerfile) is
 #      shadowed entirely by this bind mount -- Docker does NOT re-apply the

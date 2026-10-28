@@ -78,15 +78,20 @@ Edit `.env` and fill in:
 
 | Variable | Required | Description |
 |---|---|---|
-| `SESSION_SECRET` | Yes | 64-char hex string for cookie signing |
-| `ENCRYPTION_KEY` | Yes | 64-char hex string for field-level AES-256-GCM encryption |
+| `SESSION_SECRET` | Yes | 64-char hex string for cookie signing (placeholders and short values are rejected) |
+| `ENCRYPTION_KEY` | No | 64-char hex string for field-level AES-256-GCM encryption |
 | `PORT` | No | Server port (default: `3000`) |
 | `HOST` | No | Bind address (default: `127.0.0.1`) |
-| `DB_PATH` | No | SQLite file path (default: `./data/taxtracker.db`) |
+| `DB_PATH` | No | SQLite file path. Takes precedence over `DATA_DIR` |
+| `DATA_DIR` | No | Directory for `taxtracker.db`. If neither is set, `./data` is used when it already holds a database, otherwise the per-user OS data directory. The resolved path is logged at startup |
 | `FX_RATE_POLICY` | No | `hmrc-monthly` (default) or `daily-spot` |
 | `TIINGO_API_KEY` | No | Live price data (free tier: 500 symbols, 50 req/hr) |
 | `ALPHA_VANTAGE_API_KEY` | No | Dividend history import (free at alphavantage.co) |
-| `NODE_ENV` | No | Set to `production` to enable secure cookies over HTTPS |
+| `SECURE_COOKIES` | No | `auto` (default: Secure when the request arrived over HTTPS), `true` or `false` |
+| `TRUST_PROXY` | No | Set when behind a reverse proxy so `auto` sees the original protocol: `true`, or a comma-separated list of IPs, CIDRs or `loopback`/`linklocal`/`uniquelocal` (see [Reverse proxy](#reverse-proxy-https)) |
+| `LOG_LEVEL` | No | Pino log level (default: `info`) |
+
+Every secret (`SESSION_SECRET`, `ENCRYPTION_KEY`, `TIINGO_API_KEY`, `ALPHA_VANTAGE_API_KEY`) also accepts a `_FILE` variant, for example `SESSION_SECRET_FILE=/run/secrets/session`, for Docker secrets, Kubernetes secret volumes and systemd credentials.
 
 ### 4. Build and start
 
@@ -115,7 +120,7 @@ After setup, log in with the username and password you created. A 🌙/☀️ to
 cp .env.example .env
 ```
 
-Edit `.env` and fill in **real, generated** `SESSION_SECRET`/`ENCRYPTION_KEY` values (step 2 above) — the placeholders in `.env.example` are non-empty strings that pass validation, so the app will start happily with a publicly-known secret if you skip this.
+Edit `.env` and fill in **real, generated** `SESSION_SECRET`/`ENCRYPTION_KEY` values (step 2 above) — the app refuses to start if either still holds the `CHANGE_ME` placeholder from `.env.example`.
 
 The container runs as a fixed non-root UID (`10001`), and its SQLite data lives in a directory bind-mounted from the host (`./data`) so it survives a container recreate. That host directory needs to already be owned by that UID before the first run — Docker does not do this for you on a bind mount:
 
@@ -182,7 +187,12 @@ Creates a timestamped copy at `data/backups/taxtracker-YYYY-MM-DDTHH-MM-SS.db`. 
 
 Run the app behind a reverse proxy with TLS. The server binds to `127.0.0.1` by default — do **not** expose port 3000 directly.
 
-Set `NODE_ENV=production` in `.env` to enable `Secure` cookies (required for HTTPS).
+Set `TRUST_PROXY` in `.env` so the app sees the original protocol from the proxy's `X-Forwarded-Proto` header, and session cookies are then marked `Secure` automatically (`SECURE_COOKIES=auto`):
+
+- Proxy on the same host (the Caddy and nginx examples below): `TRUST_PROXY=loopback`
+- Proxy reaching a Docker container over the bridge network: `TRUST_PROXY=uniquelocal`
+
+Without it, cookies are issued without `Secure`. Setting `SECURE_COOKIES=true` without `TRUST_PROXY` means no session cookie is issued at all.
 
 ### Caddy (recommended)
 
@@ -256,7 +266,7 @@ npx vitest run src/server/services/tax/matching.test.ts
 | # | Risk | Status |
 |---|---|---|
 | A01 Broken Access Control | All API routes require a valid session via `requireAuth`. Single-tenant design — `tenant_id` scoped on every query. No IDOR: IDs are validated against `tenant_id` before returning. | **Mitigated** |
-| A02 Cryptographic Failures | Passwords: argon2id with default cost parameters. Sessions: HttpOnly, `SameSite=Lax`, 8h idle timeout; `Secure` flag enabled in production. Field-level AES-256-GCM on sensitive columns. Session secret and encryption key are required env vars (server refuses to start without them). | **Mitigated** |
+| A02 Cryptographic Failures | Passwords: argon2id with default cost parameters. Sessions: HttpOnly, `SameSite=Lax`, 8h idle timeout; `Secure` flag set automatically when the request arrived over HTTPS. Field-level AES-256-GCM on sensitive columns. The session secret is a required env var and is rejected if it is a placeholder or too short (server refuses to start). | **Mitigated** |
 | A03 Injection | All DB queries use parameterised prepared statements — no string interpolation. Input validated via Fastify JSON schema before reaching route handlers. Decimal values validated with `/^\d+(\.\d+)?$/` before `big.js`. | **Mitigated** |
 | A04 Insecure Design | Single-user, self-hosted. No user enumeration: login uses constant-time password check against a dummy hash when username is unknown. CSRF synchronizer token on all state-changing requests. | **Mitigated** |
 | A05 Security Misconfiguration | `@fastify/helmet` sets strict CSP (`default-src 'self'`), `Referrer-Policy: same-origin`, and other security headers. `robots.txt` disallows all crawlers. Rate limiting: 200 req/min global; 10 req/15min on login; 5 req/15min on setup. | **Mitigated** |
