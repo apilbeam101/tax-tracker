@@ -24,6 +24,7 @@ All notable changes to this project are documented in this file. Format follows 
 - Per-user data directory resolution (`src/server/config/paths.ts`): `DB_PATH`, then `DATA_DIR`, then an existing `./data/taxtracker.db`, otherwise the OS default (`%APPDATA%\tax-tracker`, `~/Library/Application Support/tax-tracker`, or `$XDG_DATA_HOME`/`~/.local/share/tax-tracker`). The resolved path is printed at startup, and the `scripts/` utilities use the same resolution.
 - `LOG_LEVEL` (default `info`), validated at startup.
 - `GET /health` also returns `version` and `commit` (from `GIT_COMMIT`, default `unknown`). The Dockerfile accepts a `GIT_COMMIT` build argument and sets `DATA_DIR=/app/data` and `LOG_LEVEL=warn`.
+- Key slots (`src/server/crypto/`, migration `006_key_slot.sql`): the data encryption key (DEK) is wrapped by one key-encryption key per slot, stored in a new `key_slot` table. A passphrase slot uses argon2id. A recovery slot uses a 256-bit random key, shown once as 55 Crockford base32 characters in groups of five with a 16-bit checksum, and derives its key with HKDF-SHA256. An optional unattended slot stretches `ENCRYPTION_KEY` with argon2id. Wrapping is AES-256-GCM with a random 96-bit nonce, and the associated data binds the slot type and key id. The module can create slots, unlock through any slot, change the passphrase, reset it with the recovery key, rotate the recovery key, and set or remove the unattended key. Slot writes are recorded in `audit_log` without key material and can run inside a caller's transaction. The primitives are covered by known-answer tests: AES-256-GCM against NIST GCM test case 15, HKDF against RFC 5869 test case 1, and the argon2id parameter mapping cross-checked against `node:crypto` `argon2Sync`.
 
 ### Changed
 
@@ -33,6 +34,7 @@ All notable changes to this project are documented in this file. Format follows 
 - Logging level comes from `LOG_LEVEL` instead of `NODE_ENV`, so a non-Docker production start now logs at `info` by default. `pino-pretty` is used only when stdout is a TTY and the module resolves, which fixes a crash on production installs without dev dependencies.
 - Log redaction now also scrubs `body` fields and `passphrase`, `newPassphrase`, `recoveryKey`, `dataKey`, `dek` and `wrappedDek`, at the top level and one level deep.
 - The client bundle path is resolved from the package root rather than `process.cwd()`.
+- Secrets supplied through a plain environment variable now have surrounding whitespace trimmed, matching `_FILE` behaviour, so a trailing newline no longer changes a secret's bytes (`src/server/config/secrets.ts`).
 
 - Linting moved from ESLint (which had no working config — `npm run lint` failed outright) to Biome. `typescript-eslint`'s peer dependency doesn't yet support this project's TypeScript `^7`, and Biome has no such constraint.
 - `npm run typecheck` now covers `scripts/` in addition to `src/server`/`src/shared` (previously ungated — two pre-existing type errors there are fixed).

@@ -14,7 +14,8 @@ export function readSecret(name: string, env: NodeJS.ProcessEnv, errors: string[
     errors.push(`${name} and ${name}_FILE are both set; set only one`)
     return ''
   }
-  if (!filePath) return direct ?? ''
+  // Trimmed like file content, so moving a secret between env and file never changes its bytes.
+  if (!filePath) return direct?.trim() ?? ''
 
   let content: string
   try {

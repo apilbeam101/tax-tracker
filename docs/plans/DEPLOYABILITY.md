@@ -53,10 +53,11 @@ Key handling has to work the same way across every install path before self-conf
 |---|---|---|
 | `passphrase` | argon2id over the login passphrase, with its own salt and parameters (separate from the password-verification hash) | Always |
 | `recovery` | 256-bit random recovery key, shown once at setup as grouped base32 with a checksum | Always |
-| `unattended` | `ENCRYPTION_KEY` / `ENCRYPTION_KEY_FILE`, supplied by the deployment | Optional |
+| `unattended` | `ENCRYPTION_KEY` / `ENCRYPTION_KEY_FILE`, supplied by the deployment, stretched with argon2id (a leaked database must not expose a weak operator-chosen key to fast offline guessing) | Optional |
 
 - Unlocking unwraps the DEK from any one slot, and the DEK is held only in memory.
-- Changing the passphrase rewraps that slot; no field data is re-encrypted. "Forgot passphrase" uses the recovery key to set a new one.
+- Changing the passphrase rewraps that slot; no field data is re-encrypted. "Forgot passphrase" uses the recovery key to set a new one. A lost or exposed recovery key is replaced by rotating it while unlocked.
+- Slot changes are audited in `audit_log` (action only, no key material) and can be applied inside a caller's transaction, so a passphrase change updates the login hash and the slot together.
 - The unattended key must live outside the data volume, so a volume snapshot or a DB backup never carries the key that opens it. `doctor` (Phase 3) warns otherwise.
 
 | Deployment | Slots | After restart |
