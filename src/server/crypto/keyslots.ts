@@ -241,6 +241,15 @@ export function hasKeySlots(db: Db): boolean {
   )
 }
 
+// For code that opens a database file directly and may run before migration 006 has created the
+// table (the maintenance scripts).
+export function isEncryptedDatabase(db: Db): boolean {
+  const table = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'key_slot'")
+    .get()
+  return table !== undefined && hasKeySlots(db)
+}
+
 export function hasUnattendedSlot(db: Db): boolean {
   return getSlot(db, 'unattended') !== undefined
 }

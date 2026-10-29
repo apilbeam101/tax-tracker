@@ -73,34 +73,41 @@ export function applyAutoWithholding(
  * has a withholding value, auto-derived or explicit.
  */
 export function backfillAutoWithholding(app: FastifyInstance): void {
-  const candidates = app.db
-    .prepare(`
-      SELECT t.id AS txn_id, t.tenant_id AS tenant_id
-      FROM txn t
-      JOIN instrument i ON i.id = t.instrument_id
-      WHERE t.txn_type = 'DIV_PAY'
-        AND i.currency = 'USD'
-        AND (t.dividend_withholding_gbp IS NULL OR t.dividend_withholding_gbp = '')
-    `)
-    .all() as unknown as { txn_id: number; tenant_id: number }[]
+  // The withholding amount and the instrument's currency are not queryable in SQL (the amount
+  // is encrypted), so the filter runs over the decrypted domain objects.
+  const tenantIds = (
+    app.db.prepare('SELECT DISTINCT tenant_id FROM instrument').all() as unknown as {
+      tenant_id: number
+    }[]
+  ).map((r) => r.tenant_id)
 
-  if (candidates.length === 0) return
+  for (const tenantId of tenantIds) {
+    const usdInstrumentIds = new Set(
+      app.instruments
+        .list(tenantId)
+        .filter((i) => i.currency === 'USD')
+        .map((i) => i.id),
+    )
+    const candidates = app.transactions
+      .list(tenantId)
+      .filter(
+        (t) =>
+          t.txnType === 'DIV_PAY' &&
+          usdInstrumentIds.has(t.instrumentId) &&
+          !t.dividendWithholdingGbp,
+      )
+    if (candidates.length === 0) continue
 
-  // Attribute the backfill's audit-log entries to the tenant's own user
-  // rather than a fabricated system id, so the trail reads the same as if
-  // the user had triggered the recompute themselves.
-  const userIdByTenant = new Map<number, number>()
+    // Attribute the backfill's audit-log entries to the tenant's own user
+    // rather than a fabricated system id, so the trail reads the same as if
+    // the user had triggered the recompute themselves.
+    const user = app.db
+      .prepare('SELECT id FROM user WHERE tenant_id = ? ORDER BY id ASC LIMIT 1')
+      .get(tenantId) as { id: number } | undefined
+    if (!user) continue
 
-  for (const row of candidates) {
-    let userId = userIdByTenant.get(row.tenant_id)
-    if (userId === undefined) {
-      const user = app.db
-        .prepare('SELECT id FROM user WHERE tenant_id = ? ORDER BY id ASC LIMIT 1')
-        .get(row.tenant_id) as { id: number } | undefined
-      if (!user) continue
-      userId = user.id
-      userIdByTenant.set(row.tenant_id, userId)
+    for (const txn of candidates) {
+      applyAutoWithholding(tenantId, txn.id, user.id, app.transactions, app.instruments)
     }
-    applyAutoWithholding(row.tenant_id, row.txn_id, userId, app.transactions, app.instruments)
   }
 }

@@ -72,6 +72,18 @@ export class Keyring {
     this.#notify(this.#unlockListeners)
   }
 
+  // One-way switch for a database that has just gained its key slots: from now on values are
+  // encrypted, and the keyring starts out unlocked with the key that was just created. Takes
+  // ownership of `dek`.
+  protect(dek: Buffer, options: { permanent?: boolean } = {}): void {
+    if (this.#protected) {
+      wipe(dek)
+      throw new Error('Keyring is already protected')
+    }
+    this.#protected = true
+    this.unlock(dek, options)
+  }
+
   // Wipes the key. Ignored while the key is permanent (unattended mode) or already locked.
   lock(): boolean {
     if (!this.#dek || this.#permanent) return false

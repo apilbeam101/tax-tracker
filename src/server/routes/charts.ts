@@ -147,14 +147,14 @@ export const chartRoutes: FastifyPluginAsync = async (app) => {
 
     for (const inst of instruments) {
       // Skip instruments with no transactions at all
-      const txnRows = app.db
-        .prepare(
-          `SELECT txn_date, txn_type, quantity, split_ratio
-           FROM txn
-           WHERE instrument_id = ? AND tenant_id = ?
-           ORDER BY txn_date ASC, id ASC`,
-        )
-        .all(inst.id, user.tenantId) as unknown as TxnRow[]
+      const txnRows: TxnRow[] = app.transactions
+        .list(user.tenantId, { instrumentId: inst.id })
+        .map((t) => ({
+          txn_date: t.txnDate,
+          txn_type: t.txnType,
+          quantity: t.quantity,
+          split_ratio: t.splitRatio,
+        }))
       if (txnRows.length === 0) continue
 
       // Only include instruments that had a non-zero holding at some point in the range.
@@ -166,11 +166,9 @@ export const chartRoutes: FastifyPluginAsync = async (app) => {
 
       // Ensure we have price history covering the range.
       // If our earliest cached price is more than 7 days after `from`, fetch history.
-      const earliest = app.db
-        .prepare(`SELECT MIN(price_date) as d FROM price WHERE instrument_id = ?`)
-        .get(inst.id) as { d: string | null }
+      const earliest = app.priceService.earliestCachedDate(inst.id)
 
-      const needsFetch = !earliest.d || earliest.d > addDays(from, 7)
+      const needsFetch = !earliest || earliest > addDays(from, 7)
       if (needsFetch) {
         // Fetch from the later of: `from` or the first acquisition date
         const fetchFrom = firstAcq.txn_date > from ? firstAcq.txn_date : from
@@ -178,13 +176,9 @@ export const chartRoutes: FastifyPluginAsync = async (app) => {
       }
 
       // Load all cached prices for the range
-      const priceRows = app.db
-        .prepare(
-          `SELECT price_date, close_price FROM price
-           WHERE instrument_id = ? AND price_date >= ? AND price_date <= ?
-           ORDER BY price_date ASC`,
-        )
-        .all(inst.id, from, today) as { price_date: string; close_price: string }[]
+      const priceRows = app.priceService
+        .listCached(inst.id, from, today)
+        .map((p) => ({ price_date: p.priceDate, close_price: p.closePrice }))
 
       if (priceRows.length === 0) continue
 
@@ -257,13 +251,9 @@ export const chartRoutes: FastifyPluginAsync = async (app) => {
       to = today
     }
 
-    const rows = app.db
-      .prepare(
-        `SELECT disposal_date, gain_gbp FROM cgt_disposal
-         WHERE tenant_id = ? AND disposal_date >= ? AND disposal_date <= ?
-         ORDER BY disposal_date ASC`,
-      )
-      .all(user.tenantId, from, to) as { disposal_date: string; gain_gbp: string }[]
+    const rows = app.cgtDisposals
+      .list(user.tenantId, { from, to })
+      .map((d) => ({ disposal_date: d.disposalDate, gain_gbp: d.gainGbp }))
 
     const gainByMonth = new Map<string, Big>()
     for (const row of rows) {

@@ -17,6 +17,7 @@ import { formatRecoveryKey } from './crypto/recovery.ts'
 import type { SessionTracker } from './crypto/session-tracker.ts'
 import { errorHandler, LockedError } from './errors.ts'
 import { registerLockState, unlockAtBoot } from './lock.ts'
+import { registerRepositories } from './repositories/register.ts'
 import { apiRoutes } from './routes/api.ts'
 import { authRoutes } from './routes/auth.ts'
 import { registerSession } from './session.ts'
@@ -87,21 +88,20 @@ async function build(options: {
   await app.register(fastifyCsrfProtection, { sessionPlugin: '@fastify/session' })
 
   app.decorate('db', db)
-  app.decorate('instruments', {} as never)
-  app.decorate('transactions', {} as never)
-  app.decorate('cgtDisposals', {} as never)
-  app.decorate('s104Pools', {} as never)
   app.decorate('fx', {} as never)
   app.decorate('priceService', {} as never)
 
   const clock = { now: 1_000_000 }
   const startupTasks = options.startupTasks ?? vi.fn()
-  await registerLockState(app, {
+  const lockState = registerLockState(app, {
     db,
     encryptionKey: options.bootKey ?? options.unattendedKey,
     startupTasks,
     now: () => clock.now,
   })
+  // Same order as buildApp(): keyring, then the stores built on it, then boot.
+  registerRepositories(app, db)
+  await lockState.boot()
 
   app.get('/health', async () => ({ status: 'ok' }))
   await app.register(authRoutes, { prefix: '/api/auth' })

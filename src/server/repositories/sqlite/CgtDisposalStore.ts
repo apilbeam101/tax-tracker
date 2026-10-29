@@ -1,9 +1,16 @@
 import type { MatchType } from '../../../shared/types.ts'
+import type { FieldCipher } from '../../crypto/fields.ts'
 import type { Db } from '../../db/database.ts'
 import type { CgtDisposalRecord } from '../../services/tax/matching.ts'
+import { createRowCodec, insertRow } from './rowcodec.ts'
+
+const TABLE = 'cgt_disposal'
 
 export interface CgtDisposalStore {
-  list(tenantId: number, opts?: { taxYear?: string; instrumentId?: number }): CgtDisposalRecord[]
+  list(
+    tenantId: number,
+    opts?: { taxYear?: string; instrumentId?: number; from?: string; to?: string },
+  ): CgtDisposalRecord[]
   /** Atomically replace all disposal records for an instrument: delete then
    *  re-insert in one transaction, rolling back the delete if the insert fails
    *  (e.g. a disposal date falls outside configured tax years), so a failed
@@ -44,7 +51,9 @@ function toRecord(row: CgtDisposalRow): CgtDisposalRecord {
   }
 }
 
-export function createCgtDisposalStore(db: Db): CgtDisposalStore {
+export function createCgtDisposalStore(db: Db, cipher: FieldCipher): CgtDisposalStore {
+  const codec = createRowCodec(cipher, TABLE)
+
   return {
     list(tenantId, opts = {}) {
       let sql = 'SELECT * FROM cgt_disposal WHERE tenant_id = ?'
@@ -57,38 +66,42 @@ export function createCgtDisposalStore(db: Db): CgtDisposalStore {
         sql += ' AND instrument_id = ?'
         params.push(opts.instrumentId)
       }
+      if (opts.from) {
+        sql += ' AND disposal_date >= ?'
+        params.push(opts.from)
+      }
+      if (opts.to) {
+        sql += ' AND disposal_date <= ?'
+        params.push(opts.to)
+      }
       sql += ' ORDER BY disposal_date, id'
-      return (db.prepare(sql).all(...params) as unknown as CgtDisposalRow[]).map(toRecord)
+      return (db.prepare(sql).all(...params) as unknown as CgtDisposalRow[]).map((row) =>
+        toRecord(codec.open(row)),
+      )
     },
 
     replaceForInstrument(tenantId, instrumentId, disposals) {
+      cipher.assertReady()
       const del = db.prepare('DELETE FROM cgt_disposal WHERE tenant_id = ? AND instrument_id = ?')
-      const insert = db.prepare(`
-        INSERT INTO cgt_disposal (
-          tenant_id, txn_id, instrument_id, disposal_date, tax_year,
-          match_type, acquisition_txn_id,
-          quantity, proceeds_gbp, allowable_cost_gbp, selling_costs_gbp, gain_gbp
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-      `)
 
       db.exec('BEGIN')
       try {
         del.run(tenantId, instrumentId)
         for (const d of disposals) {
-          insert.run(
-            tenantId,
-            d.txnId,
-            d.instrumentId,
-            d.disposalDate,
-            d.taxYear,
-            d.matchType,
-            d.acquisitionTxnId ?? null,
-            d.quantity,
-            d.proceedsGbp,
-            d.allowableCostGbp,
-            d.sellingCostsGbp,
-            d.gainGbp,
-          )
+          insertRow(db, codec, TABLE, {
+            tenant_id: tenantId,
+            txn_id: d.txnId,
+            instrument_id: d.instrumentId,
+            disposal_date: d.disposalDate,
+            tax_year: d.taxYear,
+            match_type: d.matchType,
+            acquisition_txn_id: d.acquisitionTxnId ?? null,
+            quantity: d.quantity,
+            proceeds_gbp: d.proceedsGbp,
+            allowable_cost_gbp: d.allowableCostGbp,
+            selling_costs_gbp: d.sellingCostsGbp,
+            gain_gbp: d.gainGbp,
+          })
         }
         db.exec('COMMIT')
       } catch (err) {

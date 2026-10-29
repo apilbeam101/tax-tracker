@@ -9,12 +9,9 @@ import { packageRoot } from './config/paths.ts'
 import { initDb } from './db/database.ts'
 import { errorHandler } from './errors.ts'
 import { registerLockState } from './lock.ts'
-import { createCgtDisposalStore } from './repositories/sqlite/CgtDisposalStore.ts'
+import { registerRepositories } from './repositories/register.ts'
 import { createFxRateStore } from './repositories/sqlite/FxRateStore.ts'
-import { createInstrumentStore } from './repositories/sqlite/InstrumentStore.ts'
 import { createPriceStore } from './repositories/sqlite/PriceStore.ts'
-import { createS104PoolStore } from './repositories/sqlite/S104PoolStore.ts'
-import { createTransactionStore } from './repositories/sqlite/TransactionStore.ts'
 import { apiRoutes } from './routes/api.ts'
 import { authRoutes } from './routes/auth.ts'
 import { healthRoute } from './routes/health.ts'
@@ -67,16 +64,9 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
   const db = await initDb(config.dbPath)
   app.decorate('db', db)
 
-  // ── Repositories & services ──────────────────────────────────────────────────
-  const fxRateStore = createFxRateStore(db)
-  app.decorate('instruments', createInstrumentStore(db))
-  app.decorate('transactions', createTransactionStore(db))
-  app.decorate('cgtDisposals', createCgtDisposalStore(db))
-  app.decorate('s104Pools', createS104PoolStore(db))
-  app.decorate('fx', createFxService(fxRateStore, config.fxRatePolicy))
-
   // ── Lock state ───────────────────────────────────────────────────────────────
-  await registerLockState(app, {
+  // Created before the stores: they encrypt and decrypt through the keyring.
+  const lockState = registerLockState(app, {
     db,
     encryptionKey: config.encryptionKey,
     // These touch decrypted data, so they run at boot when there is nothing to unlock (or an
@@ -97,12 +87,19 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
     },
   })
 
-  const priceStore = createPriceStore(db)
+  // ── Repositories & services ──────────────────────────────────────────────────
+  const cipher = registerRepositories(app, db)
+  const fxRateStore = createFxRateStore(db)
+  app.decorate('fx', createFxService(fxRateStore, config.fxRatePolicy))
+
+  const priceStore = createPriceStore(db, cipher)
   const priceProviders = [
     ...(config.tiingoApiKey ? [createTiingoProvider(config.tiingoApiKey)] : []),
     createYahooProvider(),
   ]
   app.decorate('priceService', createPriceService(priceStore, priceProviders))
+
+  await lockState.boot()
 
   // ── Static files (compiled Svelte SPA) ──────────────────────────────────────
   await app.register(fastifyStatic, {

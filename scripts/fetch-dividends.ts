@@ -28,6 +28,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { resolveDataPaths } from '../src/server/config/paths.ts'
 import { readSecret } from '../src/server/config/secrets.ts'
+import { refuseIfEncrypted } from './refuse-encrypted.ts'
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ if (!apiKey) {
 // ── DB setup ──────────────────────────────────────────────────────────────────
 
 const db = new DatabaseSync(resolveDataPaths().dbPath)
+refuseIfEncrypted(db, 'fetch-dividends')
 db.exec('PRAGMA foreign_keys = ON')
 
 const TENANT_ID = 1

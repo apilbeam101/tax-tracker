@@ -28,6 +28,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { resolveDataPaths } from '../src/server/config/paths.ts'
+import { refuseIfEncrypted } from './refuse-encrypted.ts'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,6 +89,7 @@ const tagMap = new Map<string, string>(raw.tags.map((t) => [t.id, t.name.trim()]
 const { dbPath } = resolveDataPaths()
 console.log(`Opening database: ${dbPath}`)
 const db = new DatabaseSync(dbPath)
+refuseIfEncrypted(db, 'import-ghostfolio')
 db.exec('PRAGMA foreign_keys = ON')
 
 const TENANT_ID = 1

@@ -1,4 +1,5 @@
 import type { Price } from '../../../shared/types.ts'
+import { LockedError } from '../../errors.ts'
 import type { PriceStore } from '../../repositories/index.ts'
 import type { PriceProvider } from './provider.ts'
 
@@ -32,6 +33,12 @@ export interface PriceService {
    * Does NOT trigger a live fetch.
    */
   getLatestCached(instrumentId: number): Price | undefined
+
+  /** Earliest cached price date for an instrument, or null if none. No live fetch. */
+  earliestCachedDate(instrumentId: number): string | null
+
+  /** Cached prices with from <= date <= to, oldest first. No live fetch. */
+  listCached(instrumentId: number, from: string, to: string): Price[]
 }
 
 function subtractDays(date: string, n: number): string {
@@ -59,7 +66,9 @@ export function createPriceService(store: PriceStore, providers: PriceProvider[]
             if (result && parseFloat(result.closePrice) > 0) {
               return store.upsert({ instrumentId, ...result })
             }
-          } catch {
+          } catch (err) {
+            // A locked store is a 423, not a provider failure to route around.
+            if (err instanceof LockedError) throw err
             // Provider failed; try the next one
           }
         }
@@ -74,7 +83,9 @@ export function createPriceService(store: PriceStore, providers: PriceProvider[]
           if (results.length > 0) {
             return results.map((r) => store.upsert({ instrumentId, ...r }))
           }
-        } catch {
+        } catch (err) {
+          // A locked store is a 423, not a provider failure to route around.
+          if (err instanceof LockedError) throw err
           // Provider failed; try the next one
         }
       }
@@ -83,6 +94,14 @@ export function createPriceService(store: PriceStore, providers: PriceProvider[]
 
     getLatestCached(instrumentId) {
       return store.getLatest(instrumentId)
+    },
+
+    earliestCachedDate(instrumentId) {
+      return store.earliestDate(instrumentId)
+    },
+
+    listCached(instrumentId, from, to) {
+      return store.listRange(instrumentId, from, to)
     },
   }
 }

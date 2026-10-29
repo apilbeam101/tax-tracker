@@ -29,6 +29,7 @@ All notable changes to this project are documented in this file. Format follows 
 - Account recovery and passphrase change: `POST /api/auth/recover` takes a recovery key and a new passphrase, and `POST /api/auth/change-passphrase` takes the current and new passphrase. Each updates the login hash and the passphrase key slot in one transaction and signs out every other session. Sign-in opens the passphrase slot, so it also unlocks the data; if the passphrase is accepted but does not open the slot, login returns `423` with code `UNLOCK_FAILED`. A "Forgot your passphrase?" link on the sign-in page opens a new Recover screen when key slots exist.
 - The client shows a notice on the sign-in page when the data is locked, and any data request that returns `423` (locked) or `401` (session ended) returns the app to sign-in (`src/client/src/lib/api.ts`).
 - `GET /api/auth/status` reports `locked` and `unlockMode` (`none`, `passphrase` or `unattended`). `HttpError` takes an optional `code`, which the error handler returns alongside `error` and `message`.
+- API keys entered through the UI are stored in a new encrypted `app_secret` table.
 
 ### Changed
 
@@ -44,6 +45,10 @@ All notable changes to this project are documented in this file. Format follows 
 - New password hashes are NFKC-normalised. Verification still accepts hashes made from the raw string.
 - Login, recover and change-passphrase request bodies have length limits: usernames 255 characters, passphrases 1024, recovery keys 200.
 - Log redaction also scrubs `currentPassword`.
+- Sensitive columns, audit log snapshots and cached prices are encrypted with AES-256-GCM by the repository stores, each value bound to its table, column and row. Keys, dates, transaction types, currencies, tax-year config and FX rates stay readable; `src/server/crypto/fields.ts` lists every column. This applies to databases that have key slots.
+- Ticker lookups and uniqueness use a keyed blind index (`instrument.ticker_bidx`, migration `007_field_encryption.sql`).
+- `backfill-fx`, `fetch-dividends` and `import-ghostfolio` refuse to run against an encrypted database, since they cannot unlock it. Use the app's Import / Export page instead.
+- Startup logs no longer include instrument tickers.
 
 - Linting moved from ESLint (which had no working config — `npm run lint` failed outright) to Biome. `typescript-eslint`'s peer dependency doesn't yet support this project's TypeScript `^7`, and Biome has no such constraint.
 - `npm run typecheck` now covers `scripts/` in addition to `src/server`/`src/shared` (previously ungated — two pre-existing type errors there are fixed).

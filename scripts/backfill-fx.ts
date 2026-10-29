@@ -19,6 +19,7 @@ import Big from 'big.js'
 import { resolveDataPaths } from '../src/server/config/paths.ts'
 import { createFxRateStore } from '../src/server/repositories/sqlite/FxRateStore.ts'
 import { createFxService } from '../src/server/services/fx/index.ts'
+import { refuseIfEncrypted } from './refuse-encrypted.ts'
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ interface TxnRow {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 const db = new DatabaseSync(DB_PATH)
+refuseIfEncrypted(db, 'backfill-fx')
 db.exec('PRAGMA journal_mode = WAL')
 db.exec('PRAGMA foreign_keys = ON')
 

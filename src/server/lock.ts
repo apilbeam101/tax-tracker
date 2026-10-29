@@ -57,13 +57,15 @@ export interface LockStateOptions {
   now?: () => number
 }
 
-// Creates the keyring and session tracker, decorates the app with them and decides the boot
-// unlock mode. Shared by buildApp() and the tests, so the wiring that is tested is the wiring
-// that runs.
-export async function registerLockState(
-  app: FastifyInstance,
-  options: LockStateOptions,
-): Promise<BootUnlockMode> {
+export interface LockState {
+  /** Decides the boot unlock mode and runs the startup work. Call once the stores exist. */
+  boot: () => Promise<BootUnlockMode>
+}
+
+// Creates the keyring and session tracker and decorates the app with them, so the stores can be
+// built on top of the keyring; boot() then decides the unlock mode. Shared by buildApp() and the
+// tests, so the wiring that is tested is the wiring that runs.
+export function registerLockState(app: FastifyInstance, options: LockStateOptions): LockState {
   const { db, encryptionKey, startupTasks } = options
 
   const keyring = new Keyring({
@@ -93,10 +95,14 @@ export async function registerLockState(
   }
   keyring.onUnlock(runStartupTasks)
 
-  const mode = await unlockAtBoot({ db, keyring, encryptionKey, warn: (m) => app.log.warn(m) })
-  app.log.info(`Unlock mode: ${mode}`)
-  if (mode === 'unprotected') runStartupTasks()
-  return mode
+  return {
+    async boot() {
+      const mode = await unlockAtBoot({ db, keyring, encryptionKey, warn: (m) => app.log.warn(m) })
+      app.log.info(`Unlock mode: ${mode}`)
+      if (mode === 'unprotected') runStartupTasks()
+      return mode
+    },
+  }
 }
 
 // Locked: only /health, /api/auth/* and the static client are served. This runs before the

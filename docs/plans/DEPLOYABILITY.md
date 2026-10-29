@@ -76,10 +76,11 @@ Key handling has to work the same way across every install path before self-conf
 - One module holds the DEK and overwrites the buffer on lock. Document this as best-effort, since strings derived from it can't be zeroised.
 
 ### 2c. Field coverage and format
-- Encrypt on write and decrypt on read in the repository stores ([repositories/](../../src/server/repositories/)) only. Services keep receiving plaintext domain objects, so the tax engine is unchanged.
-- Format: `v1.<keyId>.<base64url(nonce ‖ ciphertext ‖ tag)>`, AES-256-GCM with a 96-bit random nonce per value.
+- Encrypt on write and decrypt on read in the repository stores ([repositories/](../../src/server/repositories/)) only. Services keep receiving plaintext domain objects, so the tax engine is unchanged. SQL elsewhere that read, filtered or wrote an encrypted column (the projections, Tax Summary and chart routes, projection linking and the auto-withholding backfill) was moved into the stores or into code over decrypted objects, with a new `VestScheduleStore`.
+- Until the CLI can unlock a database (Phase 3), the maintenance scripts that write columns directly (`backfill-fx`, `fetch-dividends`, `import-ghostfolio`) refuse to run against an encrypted database.
+- Format: `v1.<keyId>.<base64url(nonce ‖ ciphertext ‖ tag)>`, AES-256-GCM with a 96-bit random nonce per value. The plaintext is length-prefixed and padded to a multiple of 32 bytes first, so ciphertext length does not reveal short enumerated values or the size of amounts. The AES key is derived from the DEK by HKDF, separate from the key id and the blind-index key.
   - AAD = `<table>.<column>.<rowId>`, so values can't be swapped between rows or columns.
-  - Use one row-ID strategy consistently across stores (explicit allocation, or insert-then-update in one transaction).
+  - Row IDs are allocated explicitly before the insert (what `AUTOINCREMENT` would assign), and upserts update the existing row rather than replacing it, so a value's row ID never changes.
   - `NULL` stays `NULL`.
   - Decryption failure is a hard error.
 - A column registry (`crypto/fields.ts`) classifies every column as encrypted or deliberately plaintext. A test fails if any schema column is unclassified.
@@ -91,13 +92,14 @@ Key handling has to work the same way across every install path before self-conf
 | `s104_pool` | `pool_quantity`, `pool_cost_gbp` |
 | `cgt_disposal` | `quantity`, `proceeds_gbp`, `allowable_cost_gbp`, `selling_costs_gbp`, `gain_gbp` |
 | `vest_schedule` | `quantity`, `expected_price_usd`, `notes` |
-| `price` | `close_price` (with instrument identity encrypted, plain prices would identify holdings) |
+| `price` | `close_price` (`instrument_id` stays a plain foreign key; the instrument's identity is protected because its ticker, name and ISIN are encrypted) |
 | `audit_log` | `old_data`, `new_data`, `ip_address` |
 | `app_secret` (new) | API keys entered through the UI |
 
 - Plaintext: keys, `tenant_id`, dates, `txn_type`, currencies, `instrument_type`, `match_type`, `tax_year`, `tax_year_config`, the `fx_rate` table, and timestamps. These are needed for indexing and tax-year bucketing.
 - **Blind index:** `instrument` has `UNIQUE(tenant_id, ticker)` and a ticker lookup in [InstrumentStore.ts:56](../../src/server/repositories/sqlite/InstrumentStore.ts#L56).
-  - Add `ticker_bidx = HMAC-SHA256(K_bidx, normalise(ticker))`, with `K_bidx` derived from the DEK via HKDF.
+  - Add `ticker_bidx = HMAC-SHA256(K_bidx, table.column.tenant ‖ ticker)`, with `K_bidx` derived from the DEK via HKDF. The ticker is matched exactly (case-sensitive), as the original `UNIQUE(tenant_id, ticker)` did.
+  - A trigger refuses an instrument row without `ticker_bidx` once any key slot exists, so a writer that forgets the index cannot silently lose the uniqueness rule. The 2d upgrade must set `ticker` and `ticker_bidx` in the same `UPDATE`.
   - Uniqueness moves to `UNIQUE(tenant_id, ticker_bidx)`.
   - `ORDER BY ticker` moves into the store.
   - No SQL arithmetic, range query or other ordering touches these columns (checked 2026-10-26; all arithmetic is in-app via big.js).

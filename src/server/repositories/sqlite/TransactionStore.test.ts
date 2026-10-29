@@ -1,29 +1,11 @@
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
-import { fileURLToPath } from 'node:url'
+import type { DatabaseSync } from 'node:sqlite'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { plainCipher } from '../../crypto/fields.ts'
+import { createTestDb } from '../../db/testdb.ts'
 import { createInstrumentStore } from './InstrumentStore.ts'
 import { createTransactionStore } from './TransactionStore.ts'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-
-const MIGRATIONS_DIR = join(__dirname, '../../db/migrations')
-
-function setupDb(): DatabaseSync {
-  const db = new DatabaseSync(':memory:')
-  db.exec('PRAGMA foreign_keys = ON')
-  for (const file of [
-    '001_core_schema.sql',
-    '002_tax_years_2020_2022.sql',
-    '003_rename_dividend_types.sql',
-    '004_espp_discount_price.sql',
-    '005_vest_schedule_espp_discount.sql',
-  ]) {
-    db.exec(readFileSync(join(MIGRATIONS_DIR, file), 'utf-8'))
-  }
-  return db
-}
+const setupDb = createTestDb
 
 describe('TransactionStore', () => {
   let db: DatabaseSync
@@ -33,8 +15,8 @@ describe('TransactionStore', () => {
   })
 
   it('creates a transaction and reads it back', () => {
-    const instruments = createInstrumentStore(db)
-    const store = createTransactionStore(db)
+    const instruments = createInstrumentStore(db, plainCipher)
+    const store = createTransactionStore(db, plainCipher)
 
     const inst = instruments.create(1, { ticker: 'AAPL', name: 'Apple', currency: 'USD' }, 1)
 
@@ -59,8 +41,8 @@ describe('TransactionStore', () => {
   })
 
   it('lists transactions filtered by instrumentId', () => {
-    const instruments = createInstrumentStore(db)
-    const store = createTransactionStore(db)
+    const instruments = createInstrumentStore(db, plainCipher)
+    const store = createTransactionStore(db, plainCipher)
 
     const a = instruments.create(1, { ticker: 'AAPL', name: 'Apple', currency: 'USD' }, 1)
     const b = instruments.create(1, { ticker: 'MSFT', name: 'Microsoft', currency: 'USD' }, 1)
@@ -87,8 +69,8 @@ describe('TransactionStore', () => {
   })
 
   it('writes an audit log entry on create', () => {
-    const instruments = createInstrumentStore(db)
-    const store = createTransactionStore(db)
+    const instruments = createInstrumentStore(db, plainCipher)
+    const store = createTransactionStore(db, plainCipher)
     const inst = instruments.create(1, { ticker: 'TSLA', name: 'Tesla', currency: 'USD' }, 1)
 
     store.create(
@@ -103,8 +85,8 @@ describe('TransactionStore', () => {
   })
 
   it('rejects non-decimal quantity', () => {
-    const instruments = createInstrumentStore(db)
-    const store = createTransactionStore(db)
+    const instruments = createInstrumentStore(db, plainCipher)
+    const store = createTransactionStore(db, plainCipher)
     const inst = instruments.create(1, { ticker: 'X', name: 'X', currency: 'GBP' }, 1)
 
     expect(() =>
@@ -117,8 +99,8 @@ describe('TransactionStore', () => {
   })
 
   it('writes back derived GBP fields via update', () => {
-    const instruments = createInstrumentStore(db)
-    const store = createTransactionStore(db)
+    const instruments = createInstrumentStore(db, plainCipher)
+    const store = createTransactionStore(db, plainCipher)
     const inst = instruments.create(1, { ticker: 'GOOG', name: 'Google', currency: 'USD' }, 1)
 
     const txn = store.create(
@@ -138,8 +120,8 @@ describe('TransactionStore', () => {
   })
 
   it('delete removes the row and writes audit log', () => {
-    const instruments = createInstrumentStore(db)
-    const store = createTransactionStore(db)
+    const instruments = createInstrumentStore(db, plainCipher)
+    const store = createTransactionStore(db, plainCipher)
     const inst = instruments.create(1, { ticker: 'AMZ', name: 'Amazon', currency: 'USD' }, 1)
 
     const txn = store.create(
