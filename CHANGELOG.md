@@ -25,6 +25,10 @@ All notable changes to this project are documented in this file. Format follows 
 - `LOG_LEVEL` (default `info`), validated at startup.
 - `GET /health` also returns `version` and `commit` (from `GIT_COMMIT`, default `unknown`). The Dockerfile accepts a `GIT_COMMIT` build argument and sets `DATA_DIR=/app/data` and `LOG_LEVEL=warn`.
 - Key slots (`src/server/crypto/`, migration `006_key_slot.sql`): the data encryption key (DEK) is wrapped by one key-encryption key per slot, stored in a new `key_slot` table. A passphrase slot uses argon2id. A recovery slot uses a 256-bit random key, shown once as 55 Crockford base32 characters in groups of five with a 16-bit checksum, and derives its key with HKDF-SHA256. An optional unattended slot stretches `ENCRYPTION_KEY` with argon2id. Wrapping is AES-256-GCM with a random 96-bit nonce, and the associated data binds the slot type and key id. The module can create slots, unlock through any slot, change the passphrase, reset it with the recovery key, rotate the recovery key, and set or remove the unattended key. Slot writes are recorded in `audit_log` without key material and can run inside a caller's transaction. The primitives are covered by known-answer tests: AES-256-GCM against NIST GCM test case 15, HKDF against RFC 5869 test case 1, and the argon2id parameter mapping cross-checked against `node:crypto` `argon2Sync`.
+- Lock state (`src/server/crypto/keyring.ts`, `src/server/crypto/session-tracker.ts`, `src/server/lock.ts`): the data encryption key lives in one in-memory keyring that is overwritten on lock. A session tracker mirrors the 8-hour idle window and drops the key when the last live session ends, by logout, idle timeout or sweep. While locked, API routes return `423` with `code: "LOCKED"` before authentication or body parsing; `/health`, `/api/auth/*` and the static client stay available.
+- Account recovery and passphrase change: `POST /api/auth/recover` takes a recovery key and a new passphrase, and `POST /api/auth/change-passphrase` takes the current and new passphrase. Each updates the login hash and the passphrase key slot in one transaction and signs out every other session. Sign-in opens the passphrase slot, so it also unlocks the data; if the passphrase is accepted but does not open the slot, login returns `423` with code `UNLOCK_FAILED`. A "Forgot your passphrase?" link on the sign-in page opens a new Recover screen when key slots exist.
+- The client shows a notice on the sign-in page when the data is locked, and any data request that returns `423` (locked) or `401` (session ended) returns the app to sign-in (`src/client/src/lib/api.ts`).
+- `GET /api/auth/status` reports `locked` and `unlockMode` (`none`, `passphrase` or `unattended`). `HttpError` takes an optional `code`, which the error handler returns alongside `error` and `message`.
 
 ### Changed
 
@@ -35,6 +39,11 @@ All notable changes to this project are documented in this file. Format follows 
 - Log redaction now also scrubs `body` fields and `passphrase`, `newPassphrase`, `recoveryKey`, `dataKey`, `dek` and `wrappedDek`, at the top level and one level deep.
 - The client bundle path is resolved from the package root rather than `process.cwd()`.
 - Secrets supplied through a plain environment variable now have surrounding whitespace trimmed, matching `_FILE` behaviour, so a trailing newline no longer changes a secret's bytes (`src/server/config/secrets.ts`).
+- The startup recalc and backfill jobs run through an unlock hook, once per process: at boot when the data is unprotected or an unattended key opens it, otherwise on first unlock, and retried after a failed run.
+- An `ENCRYPTION_KEY` that does not open the unattended key slot now stops the server from starting. If no unattended slot exists, the key is ignored with a warning.
+- New password hashes are NFKC-normalised. Verification still accepts hashes made from the raw string.
+- Login, recover and change-passphrase request bodies have length limits: usernames 255 characters, passphrases 1024, recovery keys 200.
+- Log redaction also scrubs `currentPassword`.
 
 - Linting moved from ESLint (which had no working config — `npm run lint` failed outright) to Biome. `typescript-eslint`'s peer dependency doesn't yet support this project's TypeScript `^7`, and Biome has no such constraint.
 - `npm run typecheck` now covers `scripts/` in addition to `src/server`/`src/shared` (previously ungated — two pre-existing type errors there are fixed).

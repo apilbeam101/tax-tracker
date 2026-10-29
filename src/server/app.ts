@@ -8,6 +8,7 @@ import { config } from './config/env.ts'
 import { packageRoot } from './config/paths.ts'
 import { initDb } from './db/database.ts'
 import { errorHandler } from './errors.ts'
+import { registerLockState } from './lock.ts'
 import { createCgtDisposalStore } from './repositories/sqlite/CgtDisposalStore.ts'
 import { createFxRateStore } from './repositories/sqlite/FxRateStore.ts'
 import { createInstrumentStore } from './repositories/sqlite/InstrumentStore.ts'
@@ -74,18 +75,27 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
   app.decorate('s104Pools', createS104PoolStore(db))
   app.decorate('fx', createFxService(fxRateStore, config.fxRatePolicy))
 
-  // Retroactively link any Projections entries that predate automatic
-  // linking to a matching transaction already on file.
-  backfillRealisedProjections(app)
+  // ── Lock state ───────────────────────────────────────────────────────────────
+  await registerLockState(app, {
+    db,
+    encryptionKey: config.encryptionKey,
+    // These touch decrypted data, so they run at boot when there is nothing to unlock (or an
+    // unattended key opens it), and otherwise on the first unlock.
+    startupTasks: () => {
+      // Retroactively link any Projections entries that predate automatic
+      // linking to a matching transaction already on file.
+      backfillRealisedProjections(app)
 
-  // Retroactively apply auto-withholding to USD dividend transactions that
-  // predate this feature.
-  backfillAutoWithholding(app)
+      // Retroactively apply auto-withholding to USD dividend transactions that
+      // predate this feature.
+      backfillAutoWithholding(app)
 
-  // Rebuild S104 pools and disposal records from the transactions. Repairs
-  // pools persisted before the same-day matching order fix, which left
-  // same-day-matched shares sitting in the pool.
-  recalcAllInstruments(app)
+      // Rebuild S104 pools and disposal records from the transactions. Repairs
+      // pools persisted before the same-day matching order fix, which left
+      // same-day-matched shares sitting in the pool.
+      recalcAllInstruments(app)
+    },
+  })
 
   const priceStore = createPriceStore(db)
   const priceProviders = [

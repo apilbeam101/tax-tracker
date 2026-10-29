@@ -232,8 +232,13 @@ function assertDekMatchesSlots(db: Db, dek: Buffer): void {
   if (slot.key_id !== keyIdOf(dek)) throw new Error('DEK does not match the stored key slots')
 }
 
+// Any slot row means the database is protected. Checking a single slot type would let deleting one
+// row quietly downgrade the app to "unprotected", so this fails closed.
 export function hasKeySlots(db: Db): boolean {
-  return getSlot(db, 'passphrase') !== undefined
+  return (
+    db.prepare('SELECT 1 AS present FROM key_slot WHERE tenant_id = ? LIMIT 1').get(TENANT_ID) !==
+    undefined
+  )
 }
 
 export function hasUnattendedSlot(db: Db): boolean {

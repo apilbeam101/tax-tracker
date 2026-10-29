@@ -1,3 +1,5 @@
+import type { Keyring } from '../crypto/keyring.ts'
+import type { SessionTracker } from '../crypto/session-tracker.ts'
 import type { Db } from '../db/database.ts'
 import type { InstrumentStore, TransactionStore } from '../repositories/index.ts'
 import type { CgtDisposalStore } from '../repositories/sqlite/CgtDisposalStore.ts'
@@ -8,6 +10,8 @@ import type { PriceService } from '../services/prices/cache.ts'
 declare module 'fastify' {
   interface FastifyInstance {
     db: Db
+    keyring: Keyring
+    sessionTracker: SessionTracker
     instruments: InstrumentStore
     transactions: TransactionStore
     cgtDisposals: CgtDisposalStore

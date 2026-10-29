@@ -2,18 +2,55 @@
   import { onMount } from 'svelte'
   import Setup from './routes/Setup.svelte'
   import Login from './routes/Login.svelte'
+  import Recover from './routes/Recover.svelte'
   import Dashboard from './routes/Dashboard.svelte'
-  import { apiFetch, clearCsrfToken } from './lib/api.ts'
+  import { apiFetch, clearCsrfToken, watchSessionLoss } from './lib/api.ts'
 
-  type AppState = 'loading' | 'setup' | 'login' | 'app'
+  type AppState = 'loading' | 'setup' | 'login' | 'recover' | 'app'
 
   let state: AppState = $state('loading')
   let currentUser: { username: string } | null = $state(null)
+  // The data is encrypted and currently locked: signing in is also what unlocks it.
+  let locked = $state(false)
+  // Key slots exist, so a recovery key can reset a forgotten passphrase.
+  let canRecover = $state(false)
 
-  onMount(async () => {
+  // Asks the server where things stand, e.g. whether signing out re-locked the data.
+  async function refreshStatus() {
+    try {
+      const data = await (await fetch('/api/auth/status')).json()
+      locked = !!data.locked
+      canRecover = data.unlockMode !== 'none'
+    } catch {
+      /* keep the previous values */
+    }
+  }
+
+  onMount(() => {
+    watchSessionLoss({
+      locked: () => {
+        currentUser = null
+        locked = true
+        canRecover = true
+        state = 'login'
+      },
+      ended: () => {
+        if (state !== 'app') return
+        currentUser = null
+        state = 'login'
+        void refreshStatus()
+      },
+    })
+    void init()
+    return () => watchSessionLoss(null)
+  })
+
+  async function init() {
     try {
       const res = await fetch('/api/auth/status')
       const data = await res.json()
+      locked = !!data.locked
+      canRecover = data.unlockMode !== 'none'
       if (data.setupRequired) {
         state = 'setup'
       } else if (!data.authenticated) {
@@ -25,7 +62,7 @@
     } catch {
       state = 'login'
     }
-  })
+  }
 
   function onSetupComplete() {
     state = 'login'
@@ -33,6 +70,8 @@
 
   function onLoginSuccess(user: { username: string }) {
     currentUser = user
+    locked = false
+    clearCsrfToken()
     state = 'app'
   }
 
@@ -42,6 +81,7 @@
     clearCsrfToken()
     currentUser = null
     state = 'login'
+    await refreshStatus()
   }
 </script>
 
@@ -52,7 +92,15 @@
   <Setup oncomplete={onSetupComplete} />
 
 {:else if state === 'login'}
-  <Login onsuccess={onLoginSuccess} />
+  <Login
+    onsuccess={onLoginSuccess}
+    {locked}
+    {canRecover}
+    onrecover={() => (state = 'recover')}
+  />
+
+{:else if state === 'recover'}
+  <Recover onsuccess={onLoginSuccess} oncancel={() => (state = 'login')} />
 
 {:else}
   <Dashboard user={currentUser} onlogout={onLogout} />

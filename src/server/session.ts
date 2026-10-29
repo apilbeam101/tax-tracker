@@ -2,6 +2,8 @@ import fastifyCookie from '@fastify/cookie'
 import fastifySession from '@fastify/session'
 import type { FastifyInstance } from 'fastify'
 
+export const SESSION_IDLE_MS = 8 * 60 * 60 * 1000
+
 export interface SessionOptions {
   secret: string
   secureCookies: 'auto' | boolean
@@ -18,7 +20,7 @@ export async function registerSession(app: FastifyInstance, opts: SessionOptions
       secure: opts.secureCookies,
       httpOnly: true,
       sameSite: 'lax',
-      maxAge: 8 * 60 * 60 * 1000, // 8h idle timeout
+      maxAge: SESSION_IDLE_MS,
     },
     saveUninitialized: false,
   })

@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { requireAuth } from '../auth/middleware.ts'
+import { requireLiveSession, requireUnlocked } from '../lock.ts'
 import { chartRoutes } from './charts.ts'
 import { holdingRoutes } from './holdings.ts'
 import { importExportRoutes } from './import-export.ts'
@@ -12,7 +13,9 @@ import { transactionRoutes } from './transactions.ts'
  * Parent plugin for all authenticated API routes.
  */
 export const apiRoutes: FastifyPluginAsync = async (app) => {
+  app.addHook('onRequest', requireUnlocked)
   app.addHook('preHandler', requireAuth)
+  app.addHook('preHandler', requireLiveSession)
   // Protect all state-mutating methods against CSRF.
   // GET and HEAD are safe (read-only); everything else requires the csrf-token header.
   app.addHook('preHandler', (req, reply, done) => {

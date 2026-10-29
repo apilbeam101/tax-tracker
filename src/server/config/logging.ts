@@ -6,6 +6,7 @@ const SECRET_FIELDS = [
   'encryptionKey',
   'apiKey',
   'password',
+  'currentPassword',
   'passphrase',
   'newPassphrase',
   'recoveryKey',

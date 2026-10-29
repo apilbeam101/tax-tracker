@@ -68,6 +68,8 @@ Key handling has to work the same way across every install path before self-conf
 
 ### 2b. Lock state
 - **Locked:** only `/health`, `/api/auth/*` and the static client are served. Other API routes return `423 Locked` with a stable error code, and the client ([api.ts](../../src/client/src/lib/api.ts)) shows the unlock screen.
+- **Existing databases without key slots** are unprotected and behave as before until 2d creates the slots. Any `key_slot` row marks a database as protected, so deleting one slot cannot silently downgrade it.
+- **Sign-in is unlock:** the login passphrase is also the passphrase slot, so `POST /api/auth/login` verifies the hash and opens the slot; `POST /api/auth/recover` (recovery key plus new passphrase) and `POST /api/auth/change-passphrase` update the hash and the slot in one transaction. A credential change signs out every other session.
 - **Unlocked:** the DEK is held while any session is valid. Logout of the last session, or the 8-hour idle timeout, drops it. Unattended mode stays unlocked for the process lifetime.
 - **Startup work:** `recalcAllInstruments()`, `backfillRealisedProjections()` and `backfillAutoWithholding()` ([app.ts](../../src/server/app.ts)) move to an `onUnlock` hook, so they run at boot in unattended mode and on first unlock otherwise.
 - **While locked:** scheduled backups still run, since they copy ciphertext. FX fetches still run, since that's public data. Price refresh waits for unlock.

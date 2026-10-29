@@ -1,5 +1,15 @@
 <script lang="ts">
-  let { onsuccess }: { onsuccess: (user: { username: string }) => void } = $props()
+  let {
+    onsuccess,
+    locked = false,
+    canRecover = false,
+    onrecover,
+  }: {
+    onsuccess: (user: { username: string }) => void
+    locked?: boolean
+    canRecover?: boolean
+    onrecover?: () => void
+  } = $props()
 
   let username = $state('admin')
   let password = $state('')
@@ -35,6 +45,9 @@
   <div class="card">
     <h1>UK Tax Tracker</h1>
     <form onsubmit={submit}>
+      {#if locked}
+        <div class="notice">Your data is locked. Sign in to unlock it.</div>
+      {/if}
       {#if error}
         <div class="error">{error}</div>
       {/if}
@@ -49,6 +62,9 @@
       <button type="submit" disabled={loading}>
         {loading ? 'Signing in…' : 'Sign in'}
       </button>
+      {#if canRecover}
+        <button type="button" class="link" onclick={onrecover}>Forgot your passphrase?</button>
+      {/if}
     </form>
   </div>
 </div>
@@ -69,6 +85,16 @@
     color: var(--danger-text);
     border-radius: 4px; padding: .75rem; margin-bottom: 1rem;
     font-size: .875rem;
+  }
+  .notice {
+    background: var(--accent-bg); border: 1px solid var(--accent-border);
+    color: var(--accent-text);
+    border-radius: 4px; padding: .75rem; margin-bottom: 1rem;
+    font-size: .875rem;
+  }
+  button.link {
+    background: none; color: var(--link); margin-top: .75rem;
+    font-size: .875rem; text-decoration: underline;
   }
   label { display: block; margin-bottom: 1rem; font-weight: 500; }
   input {
