@@ -6,6 +6,7 @@ import { holdingRoutes } from './holdings.ts'
 import { importExportRoutes } from './import-export.ts'
 import { instrumentRoutes } from './instruments.ts'
 import { projectionRoutes } from './projections.ts'
+import { settingsRoutes } from './settings.ts'
 import { taxRoutes } from './tax.ts'
 import { transactionRoutes } from './transactions.ts'
 
@@ -36,4 +37,5 @@ export const apiRoutes: FastifyPluginAsync = async (app) => {
   await app.register(chartRoutes, { prefix: '/charts' })
   await app.register(projectionRoutes, { prefix: '/projections' })
   await app.register(importExportRoutes)
+  await app.register(settingsRoutes, { prefix: '/settings' })
 }

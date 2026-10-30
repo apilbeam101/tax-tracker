@@ -37,6 +37,11 @@ All notable changes to this project are documented in this file. Format follows 
 - Endpoints `POST /api/auth/upgrade`, `POST /api/auth/upgrade/confirm` and `POST /api/auth/recovery-key/rotate`.
   - `GET /api/auth/status` adds `upgrade` (`none`, `available` or `confirm`) and `unattendedKeyAvailable`.
   - The upgrade lists older copies of the database (backup-script output, `.bak` files, Ghostfolio exports) so the user can review them.
+- First-run setup creates the key slots itself, reusing the upgrade's recovery key screen: choosing a passphrase signs the user in and shows a recovery key that must be typed back before continuing, so a fresh install starts in the current storage format and never sees the upgrade screen. If the database already holds data, setup only creates the user and the in-app upgrade is offered at sign-in. Confirming a recovery key after a fresh install does not remove any safety copies.
+- `AUTO_CONFIG` (default `false`): when `true` ("self-configured" mode), a generated `SESSION_SECRET` and the non-secret settings `HOST`, `PORT`, `FX_RATE_POLICY`, `LOG_LEVEL`, `SECURE_COOKIES` and `TRUST_PROXY` are kept in `config.json` in the data directory, written atomically (mode `0600` on Linux and macOS). The file never holds key material or API keys, and environment variables always override it. The default mode reads only the environment and writes nothing.
+- Settings page for API keys: Tiingo and Alpha Vantage keys can be entered in a new Settings page and are stored encrypted. A saved key applies without a restart. Keys supplied through the environment (including `_FILE` variants) always take precedence, and in the default environment-supplied mode the API key fields are read-only.
+- `runInit()` (`src/server/init.ts`) prepares the config file and reports where data lives; the `init` command will use it once the CLI is added.
+- README and `.env.example` document `AUTO_CONFIG`, the Settings page and first-run setup.
 
 ### Changed
 

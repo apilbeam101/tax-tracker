@@ -16,6 +16,22 @@ function toDateStr(isoWithTime: string): string {
   return isoWithTime.slice(0, 10)
 }
 
+// Reads the key on every call, so one entered in the UI applies without a restart. With no key it
+// reports no data, which lets the price service fall through to the next provider.
+export function createKeyedTiingoProvider(getApiKey: () => string | undefined): PriceProvider {
+  return {
+    name: 'tiingo',
+    async getPrice(ticker, currency, date) {
+      const key = getApiKey()
+      return key ? createTiingoProvider(key).getPrice(ticker, currency, date) : null
+    },
+    async getHistoricalPrices(ticker, currency, from, to) {
+      const key = getApiKey()
+      return key ? createTiingoProvider(key).getHistoricalPrices(ticker, currency, from, to) : []
+    },
+  }
+}
+
 export function createTiingoProvider(apiKey: string): PriceProvider {
   if (!apiKey) throw new Error('Tiingo API key is required')
 

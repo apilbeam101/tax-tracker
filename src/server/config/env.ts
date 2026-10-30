@@ -5,6 +5,7 @@
 
 import { isIP } from 'node:net'
 import { homedir } from 'node:os'
+import { ensureConfigFile } from './file.ts'
 import { resolveDataPaths } from './paths.ts'
 import { readSecret, validateStrongSecret } from './secrets.ts'
 
@@ -131,6 +132,55 @@ export function buildConfig(env: NodeJS.ProcessEnv = process.env) {
   }
 }
 
-export const config = buildConfig()
+export type ConfigMode = 'env-supplied' | 'self-configured'
+
+export type LoadedConfig = ReturnType<typeof buildConfig> & {
+  configMode: ConfigMode
+  configFile: string | undefined
+}
+
+function parseAutoConfig(raw: string | undefined): boolean {
+  if (!raw || raw === 'false') return false
+  if (raw === 'true') return true
+  throw new Error(
+    `Invalid environment configuration:\n  - AUTO_CONFIG must be true or false, got: ${raw}`,
+  )
+}
+
+// Env-supplied mode (the default) never touches config.json. Self-configured mode (AUTO_CONFIG=true,
+// which the CLI and installers turn on) keeps a generated SESSION_SECRET and the non-secret
+// settings in <dataDir>/config.json; anything set in the environment still wins over the file.
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): LoadedConfig {
+  if (!parseAutoConfig(env.AUTO_CONFIG)) {
+    return {
+      ...buildConfig(env),
+      configMode: 'env-supplied',
+      configFile: undefined,
+    }
+  }
+
+  const { dataDir } = resolveDataPaths({
+    env,
+    cwd: process.cwd(),
+    platform: process.platform,
+    home: homedir(),
+  })
+  const file = ensureConfigFile(dataDir, {
+    needSessionSecret: !env.SESSION_SECRET && !env.SESSION_SECRET_FILE,
+  })
+  const merged: NodeJS.ProcessEnv = { ...env }
+  for (const [name, value] of Object.entries(file.values)) {
+    if (env[name]) continue
+    if (name === 'SESSION_SECRET' && env.SESSION_SECRET_FILE) continue
+    merged[name] = value
+  }
+  return {
+    ...buildConfig(merged),
+    configMode: 'self-configured',
+    configFile: file.path,
+  }
+}
+
+export const config = loadConfig()
 
 export type Config = typeof config

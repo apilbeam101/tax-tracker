@@ -4,6 +4,9 @@ import { requireAuth, type SessionUser } from '../auth/middleware.ts'
 import { DUMMY_HASH, hashPassword, verifyPassword } from '../auth/password.ts'
 import {
   applySlot,
+  hasKeySlots,
+  insertInitialSlots,
+  prepareInitialSlots,
   preparePassphraseSlot,
   rotateRecoveryKey,
   unlockWithPassphrase,
@@ -12,7 +15,10 @@ import {
 import {
   ALREADY_ENCRYPTED,
   ALREADY_ENCRYPTED_CODE,
+  holdsStoredValues,
+  keysCreatedAtSetup,
   listPlaintextCopies,
+  recordDatabaseCreated,
   recordRecoveryKeyConfirmed,
   recoveryKeyNeedsConfirmation,
   removePreEncryptionBackups,
@@ -27,6 +33,7 @@ interface LoginBody {
 }
 interface SetupBody {
   password: string
+  unattended?: boolean
 }
 interface RecoverBody {
   recoveryKey: string
@@ -72,7 +79,17 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       dek?.fill(0)
       throw err
     }
+    return activateSession(req, previousId, row, dek)
+  }
 
+  // The synchronous half of startSession(), for callers that must regenerate the session before
+  // they make the key available.
+  function activateSession(
+    req: FastifyRequest,
+    previousId: string,
+    row: UserRow,
+    dek: Buffer | null,
+  ): SessionUser {
     if (dek) {
       if (app.keyring.isLocked) app.keyring.unlock(dek)
       else dek.fill(0)
@@ -137,29 +154,35 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
    * logged in.
    */
   app.get('/status', async (req) => {
-    const userCount = (app.db.prepare('SELECT COUNT(*) AS n FROM user').get() as { n: number }).n
+    const users = userCount()
     const { keyring } = app
     // A session the tracker has dropped (idle, or revoked by a credential change) is not signed in.
     const live = !!req.session.user && app.sessionTracker.touch(req.session.sessionId)
     return {
-      setupRequired: userCount === 0,
+      setupRequired: users === 0,
       authenticated: live,
       user: live ? (req.session.user ?? null) : null,
       locked: keyring.isLocked,
       unlockMode: !keyring.isProtected ? 'none' : keyring.isPermanent ? 'unattended' : 'passphrase',
       // 'available': the data is not encrypted yet. 'confirm': it was encrypted but the user has
       // not yet proved they hold the recovery key, so the plaintext safety copy still exists.
-      upgrade: live ? upgradeState(userCount) : 'none',
+      upgrade: live ? upgradeState(users) : 'none',
       // Whether the server has an ENCRYPTION_KEY the user could opt into using for automatic
-      // unlock when encrypting.
-      unattendedKeyAvailable: live && !keyring.isProtected && Boolean(app.runtime.unattendedKey),
+      // unlock when setting up or encrypting.
+      unattendedKeyAvailable:
+        (live || users === 0) && !keyring.isProtected && Boolean(app.runtime.unattendedKey),
     }
   })
 
+  function userCount(): number {
+    return (app.db.prepare('SELECT COUNT(*) AS n FROM user').get() as { n: number }).n
+  }
+
   /**
    * POST /api/auth/setup
-   * First-run only: create the single local user with the chosen passphrase.
-   * Rate-limited: 5 attempts per 15 minutes.
+   * First-run only: create the single local user and the key slots for the chosen passphrase, and
+   * sign them in. The recovery key in the response is shown once; the client has the user type it
+   * back through /upgrade/confirm. Rate-limited: 5 attempts per 15 minutes.
    */
   app.post<{ Body: SetupBody }>(
     '/setup',
@@ -175,22 +198,94 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
               minLength: MIN_PASSPHRASE_LENGTH,
               maxLength: MAX_SECRET_LENGTH,
             },
+            unattended: { type: 'boolean' },
           },
         },
       },
     },
     async (req, reply) => {
-      const existing = (app.db.prepare('SELECT COUNT(*) AS n FROM user').get() as { n: number }).n
-      if (existing > 0) {
-        return reply.status(409).send({ error: 'Setup already completed' })
+      if (userCount() > 0) return reply.status(409).send({ error: 'Setup already completed' })
+      if (app.keyring.isProtected) {
+        throw new ConflictError('Key slots exist but there is no user; restore the database')
+      }
+      const unattendedKey = req.body.unattended ? app.runtime.unattendedKey : undefined
+      if (req.body.unattended && !unattendedKey) {
+        throw new ConflictError('No ENCRYPTION_KEY is configured on the server')
       }
 
+      // A database that already holds values (imported before anyone set up) cannot simply be
+      // wrapped in a new key: those values are plaintext. Such a setup only creates the user, and
+      // the sign-in then offers the in-app upgrade, which seals what is there.
+      const withData = holdsStoredValues(app.db)
       const passwordHash = await hashPassword(req.body.password)
-      app.db
-        .prepare('INSERT INTO user (tenant_id, username, password_hash) VALUES (?, ?, ?)')
-        .run(1, 'admin', passwordHash)
+      const prepared = withData
+        ? null
+        : await prepareInitialSlots(req.body.password, {
+            unattendedKey,
+            ...(app.runtime.passphraseKdf ? { passphraseKdf: app.runtime.passphraseKdf } : {}),
+          })
 
-      return reply.status(201).send({ ok: true })
+      const previousId = req.session.sessionId
+      try {
+        await req.session.regenerate()
+      } catch (err) {
+        prepared?.dek.fill(0)
+        throw err
+      }
+
+      let row: UserRow | undefined
+      // Synchronous from here to the end of the handler's work: the commit, the keyring switching
+      // to encrypting and the session appearing together, so no request can write a plaintext row
+      // in between and a lone sweep cannot lock a key that has no session yet.
+      try {
+        app.db.exec('BEGIN IMMEDIATE')
+        try {
+          if (userCount() > 0) throw new ConflictError('Setup already completed')
+          if (holdsStoredValues(app.db) !== withData) {
+            throw new ConflictError('The database changed during setup. Please try again.')
+          }
+          const inserted = app.db
+            .prepare('INSERT INTO user (tenant_id, username, password_hash) VALUES (?, ?, ?)')
+            .run(1, 'admin', passwordHash)
+          row = {
+            id: Number(inserted.lastInsertRowid),
+            tenant_id: 1,
+            username: 'admin',
+            password_hash: passwordHash,
+          }
+          if (prepared) {
+            insertInitialSlots(app.db, prepared.slots)
+            recordDatabaseCreated(app.db)
+          }
+          try {
+            app.db.exec('COMMIT')
+          } catch (commitError) {
+            // An I/O error on COMMIT can still have landed. If it did, carry on as for a success:
+            // treating it as a failure would leave stored key slots with a keyring not using them.
+            if (!(prepared ? hasKeySlots(app.db) : userCount() > 0)) throw commitError
+          }
+        } catch (err) {
+          try {
+            app.db.exec('ROLLBACK')
+          } catch {
+            /* ignore secondary rollback failure */
+          }
+          throw err
+        }
+      } catch (err) {
+        prepared?.dek.fill(0)
+        throw err
+      }
+      if (prepared) app.keyring.protect(prepared.dek, { permanent: Boolean(unattendedKey) })
+      const user = activateSession(req, previousId, row!, null)
+
+      reply.header('Cache-Control', 'no-store')
+      return reply.status(201).send({
+        ok: true,
+        user,
+        recoveryKey: prepared?.recoveryKey ?? null,
+        unattended: Boolean(prepared && unattendedKey),
+      })
     },
   )
 
@@ -444,9 +539,10 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       const dek = await unlockWithRecoveryKey(app.db, req.body.recoveryKey)
       if (!dek) return reply.status(401).send({ error: 'That is not your recovery key' })
       dek.fill(0)
+      const freshInstall = keysCreatedAtSetup(app.db)
       recordRecoveryKeyConfirmed(app.db)
       return {
-        removed: removePreEncryptionBackups(backupDir),
+        removed: freshInstall ? [] : removePreEncryptionBackups(backupDir),
         plaintextCopies: listPlaintextCopies(app.runtime.dataDir, backupDir),
       }
     },

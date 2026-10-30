@@ -61,7 +61,8 @@ npm install
 ### 2. Generate secrets
 
 ```bash
-# SESSION_SECRET — at least 32 bytes of random hex
+# SESSION_SECRET — at least 32 bytes of random hex. Skip it if you set AUTO_CONFIG=true (see below):
+# the app then generates one into config.json in the data directory.
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 # ENCRYPTION_KEY — optional, only for an always-on server that should unlock its data by itself
@@ -79,7 +80,8 @@ Edit `.env` and fill in:
 
 | Variable | Required | Description |
 |---|---|---|
-| `SESSION_SECRET` | Yes | 64-char hex string for cookie signing (placeholders and short values are rejected) |
+| `AUTO_CONFIG` | No | `false` (default): every setting comes from the environment and the app never writes configuration. `true`: self-configured mode, see below |
+| `SESSION_SECRET` | Yes, unless `AUTO_CONFIG=true` | 64-char hex string for cookie signing (placeholders and short values are rejected) |
 | `ENCRYPTION_KEY` | No | 64-char hex string. Optional: when you encrypt the database you can choose to use it to unlock the data automatically at startup. The key then sits next to the data, so leave it unset unless the server must restart unattended |
 | `PORT` | No | Server port (default: `3000`) |
 | `HOST` | No | Bind address (default: `127.0.0.1`) |
@@ -93,6 +95,8 @@ Edit `.env` and fill in:
 | `LOG_LEVEL` | No | Pino log level (default: `info`) |
 
 Every secret (`SESSION_SECRET`, `ENCRYPTION_KEY`, `TIINGO_API_KEY`, `ALPHA_VANTAGE_API_KEY`) also accepts a `_FILE` variant, for example `SESSION_SECRET_FILE=/run/secrets/session`, for Docker secrets, Kubernetes secret volumes and systemd credentials.
+
+**Self-configured mode (`AUTO_CONFIG=true`).** If `SESSION_SECRET` is not supplied, the app generates one into `config.json` in the data directory and reuses it on later starts. The file is written atomically with mode `0600` on Linux and macOS (on Windows it relies on the per-user data directory), and holds only that secret plus the non-secret settings `HOST`, `PORT`, `FX_RATE_POLICY`, `LOG_LEVEL`, `SECURE_COOKIES` and `TRUST_PROXY`. It never holds `ENCRYPTION_KEY`, API keys or any other key material, and the app refuses to start if the file contains anything else. Variables set in the environment always override the file. In a container, the data volume must be writable and persistent; otherwise the secret is regenerated at every start and everyone is signed out.
 
 ### 4. Build and start
 
@@ -109,9 +113,15 @@ npm run dev
 
 ### 5. First-run setup
 
-Open `http://localhost:3000` in your browser. You will be prompted to create a passphrase — this derives the encryption key used for sensitive field-level encryption. **Store this passphrase securely; losing it means losing access to encrypted data.**
+Open `http://localhost:3000` in your browser. Setup has three steps:
 
-After setup, log in with the username and password you created. A 🌙/☀️ toggle in the nav bar (next to the number-masking toggle) switches between light and dark themes; the choice is remembered in your browser.
+1. Choose a passphrase. It signs you in and unlocks your data: it protects a randomly generated data key, which in turn protects the sensitive fields.
+2. Save your **recovery key**. It is shown once and you must type it back to continue. It is the only way back in if you forget your passphrase. **Store the passphrase and the recovery key securely and separately; losing both means losing access to your data.**
+3. Optionally enter API keys (Tiingo, Alpha Vantage). In self-configured mode (`AUTO_CONFIG=true`), keys entered here are stored encrypted with your data and can be changed later under Settings. In the default env-supplied mode the API key fields are read-only: keys come from the environment (`.env`, Docker or Kubernetes secrets), so a redeploy always matches what you configured. A key supplied through the environment always takes precedence and is shown as "Set via environment".
+
+If you started from a database created by an earlier version, you are offered an in-app upgrade after you sign in instead.
+
+Setup signs you in. On later visits, sign in with username `admin` and your passphrase; that also unlocks your data. A 🌙/☀️ toggle in the nav bar (next to the number-masking toggle) switches between light and dark themes; the choice is remembered in your browser.
 
 ---
 
@@ -143,15 +153,14 @@ The published port is bound to `127.0.0.1` only, same as the non-Docker setup �
 ## Optional: Live prices (Tiingo)
 
 1. Sign up for a free account at [tiingo.com](https://www.tiingo.com)
-2. Copy your API token to `.env` as `TIINGO_API_KEY`
-3. Restart the server
+2. Set it in the environment (`.env`) as `TIINGO_API_KEY` and restart the server, or, with `AUTO_CONFIG=true`, enter it under Settings in the app (no restart needed)
 
 Without Tiingo, prices fall back to Yahoo Finance (no API key required). If neither returns data, holdings valuations will show `—`.
 
 ## Optional: Dividend history import (Alpha Vantage)
 
 1. Get a free API key at [alphavantage.co](https://www.alphavantage.co)
-2. Add to `.env` as `ALPHA_VANTAGE_API_KEY`
+2. Set `ALPHA_VANTAGE_API_KEY` in the environment, or, with `AUTO_CONFIG=true`, enter it under Settings in the app
 3. Use the "↓ Import dividends" button on the Transactions page to pull dividend history per instrument
 
 For USD-currency holdings, US withholding tax (15% under the UK-US tax treaty, assuming a valid W-8BEN is on file with your broker) is filled in automatically on dividend transactions when no withholding amount is entered or imported. Edit the transaction afterwards if your actual broker statement shows a different figure — an explicit value is never overwritten.
@@ -282,4 +291,5 @@ npx vitest run src/server/services/tax/matching.test.ts
 - **This app is single-user and self-hosted.** Do not expose port 3000 directly — always place it behind a reverse proxy with TLS.
 - Keep your `.env` file out of version control (it is in `.gitignore`).
 - Back up the database regularly (`npm run backup`). The backup is a plain SQLite file — store it somewhere safe, preferably off-site.
-- Encrypted fields use a key derived from your passphrase. The plaintext key is never stored on disk.
+- Encrypted fields use a random data key that is wrapped by your passphrase and by the recovery key. The plaintext data key is never stored on disk, and is held in memory only while a session is signed in (or permanently, if you opted in to an unattended `ENCRYPTION_KEY` slot).
+- `config.json` (self-configured mode) holds the session secret and non-secret settings only, never key material. API keys entered in the UI are stored encrypted.

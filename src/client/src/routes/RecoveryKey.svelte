@@ -17,6 +17,8 @@
   let recoveryKey = $state(freshKey?.recoveryKey ?? '')
   // svelte-ignore state_referenced_locally
   let copies: PlaintextCopy[] = $state(freshKey?.plaintextCopies ?? [])
+  // svelte-ignore state_referenced_locally
+  const firstRun = freshKey?.firstRun === true
   let typedBack = $state('')
   let removed: string[] = $state([])
   let passphrase = $state('')
@@ -93,11 +95,13 @@
 <div class="container">
   <div class="card">
     {#if done}
-      <h1>Your data is encrypted</h1>
-      {#if removed.length > 0}
+      <h1>{firstRun ? 'Recovery key saved' : 'Your data is encrypted'}</h1>
+      {#if firstRun}
+        <p>Your data will be stored encrypted from now on.</p>
+      {:else if removed.length > 0}
         <p>The unencrypted safety copy made before encryption has been removed.</p>
       {:else}
-        <p>No unencrypted safety copy was found, so there was nothing to remove.</p>
+        <p>Your recovery key is confirmed. No unencrypted safety copy needed removing.</p>
       {/if}
       {#if copies.length > 0}
         <div class="warn">
@@ -118,10 +122,12 @@
           This key can unlock your data if you forget your passphrase. It is shown <strong>once</strong>.
           Store it somewhere safe, separate from your passphrase.
         </p>
-        {#if freshKey}
+        {#if freshKey && (!firstRun || freshKey.unattended)}
           <div class="warn">
-            An unencrypted safety copy of your data was saved as <strong>{freshKey.safetyCopy}</strong>
-            in the backups folder. It is removed when you confirm your recovery key below.
+            {#if !firstRun}
+              An unencrypted safety copy of your data was saved as <strong>{freshKey.safetyCopy}</strong>
+              in the backups folder. It is removed when you confirm your recovery key below.
+            {/if}
             {#if freshKey.unattended}
               The server will unlock the data on its own at startup using its ENCRYPTION_KEY.
             {/if}
@@ -157,8 +163,9 @@
         </button>
       {:else}
         <p>
-          Your data is encrypted, but you have not yet confirmed a recovery key, and an unencrypted
-          safety copy is still on disk. Create a new recovery key to finish.
+          Your data is encrypted, but you have not yet confirmed a recovery key. Create a new
+          recovery key to finish. Any unencrypted safety copy made before encryption is removed
+          once you confirm it.
         </p>
         <form onsubmit={makeNewKey}>
           {#if error}<div class="error">{error}</div>{/if}
@@ -169,7 +176,9 @@
           <button type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create a new recovery key'}</button>
         </form>
       {/if}
-      <button type="button" class="link" onclick={onlater}>Later</button>
+      {#if !firstRun}
+        <button type="button" class="link" onclick={onlater}>Later</button>
+      {/if}
     {/if}
   </div>
 </div>

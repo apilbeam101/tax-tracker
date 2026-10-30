@@ -12,7 +12,10 @@ try {
   await buildApp(server)
   await server.listen({ host: config.host, port: config.port })
   console.log(`\n  UK Tax Tracker running at http://${config.host}:${config.port}`)
-  console.log(`  Data directory: ${config.dataDir} (from ${config.dataDirSource})\n`)
+  console.log(`  Data directory: ${config.dataDir} (from ${config.dataDirSource})`)
+  console.log(
+    `  Configuration: ${config.configMode}${config.configFile ? ` (${config.configFile})` : ''}\n`,
+  )
 } catch (err) {
   server.log.error(err)
   process.exit(1)

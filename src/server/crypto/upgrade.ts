@@ -52,6 +52,7 @@ function tablesWithEncryptedColumns(): string[] {
 // restarts, so it does not depend on which files happen to be on disk.
 const EVENT = {
   encrypted: 'database.encrypted',
+  created: 'database.created',
   scrubPending: 'database.scrub_pending',
   scrubDone: 'database.scrub_done',
   recoveryRotated: 'key_slot.recovery.rotate',
@@ -324,8 +325,35 @@ export function scrubIfPending(db: Db): boolean | null {
  * deleting that file cannot hide a recovery key the user never saw.
  */
 export function recoveryKeyNeedsConfirmation(db: Db): boolean {
-  const latest = latestEvent(db, [EVENT.encrypted, EVENT.recoveryRotated, EVENT.recoveryConfirmed])
-  return latest === EVENT.encrypted || latest === EVENT.recoveryRotated
+  const latest = latestEvent(db, [
+    EVENT.encrypted,
+    EVENT.created,
+    EVENT.recoveryRotated,
+    EVENT.recoveryConfirmed,
+  ])
+  return latest !== undefined && latest !== EVENT.recoveryConfirmed
+}
+
+// A fresh install creates its key slots at setup, so there is no earlier plaintext copy for
+// confirming the recovery key to remove. Any safety copy in the backups folder is someone else's.
+export function keysCreatedAtSetup(db: Db): boolean {
+  return latestEvent(db, [EVENT.encrypted, EVENT.created]) === EVENT.created
+}
+
+export function recordDatabaseCreated(db: Db): void {
+  recordEvent(db, EVENT.created)
+}
+
+// True if any encrypted column of any table holds a value. On a database with no key slots those
+// are plaintext, which setup must not wrap in a key it then cannot read them with.
+export function holdsStoredValues(db: Db): boolean {
+  return tablesWithEncryptedColumns().some((table) =>
+    encryptedColumns(table).some(
+      (column) =>
+        db.prepare(`SELECT 1 FROM ${table} WHERE ${column} IS NOT NULL LIMIT 1`).get() !==
+        undefined,
+    ),
+  )
 }
 
 export function recordRecoveryKeyConfirmed(db: Db): void {

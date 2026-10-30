@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { createFieldCipher, type FieldCipher } from '../crypto/fields.ts'
 import type { Db } from '../db/database.ts'
+import { createApiKeys } from '../services/api-keys.ts'
 import { createAppSecretStore } from './sqlite/AppSecretStore.ts'
 import { createCgtDisposalStore } from './sqlite/CgtDisposalStore.ts'
 import { createInstrumentStore } from './sqlite/InstrumentStore.ts'
@@ -19,5 +20,14 @@ export function registerRepositories(app: FastifyInstance, db: Db): FieldCipher 
   app.decorate('s104Pools', createS104PoolStore(db, cipher))
   app.decorate('vestSchedules', createVestScheduleStore(db, cipher))
   app.decorate('appSecrets', createAppSecretStore(db, cipher))
+  app.decorate(
+    'apiKeys',
+    createApiKeys({
+      fromEnv: app.runtime.apiKeysFromEnv ?? {},
+      store: app.appSecrets,
+      tenantId: 1,
+      isLocked: () => app.keyring.isLocked,
+    }),
+  )
   return cipher
 }

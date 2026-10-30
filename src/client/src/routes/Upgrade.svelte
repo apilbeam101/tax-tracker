@@ -11,6 +11,8 @@
     plaintextCopies: PlaintextCopy[]
     scrubbed: boolean
     unattended: boolean
+    // A fresh install: there was no earlier data, so no safety copy, and the key must be confirmed.
+    firstRun?: boolean
   }
 </script>
 

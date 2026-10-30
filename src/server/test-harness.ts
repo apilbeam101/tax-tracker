@@ -16,6 +16,7 @@ import { registerLockState } from './lock.ts'
 import { registerRepositories } from './repositories/register.ts'
 import { apiRoutes } from './routes/api.ts'
 import { authRoutes } from './routes/auth.ts'
+import type { ApiKeyName } from './services/api-keys.ts'
 import { registerSession } from './session.ts'
 
 // Test support: the real lock-state, store and route wiring on an in-memory database, with a
@@ -54,6 +55,8 @@ export interface BuildOptions {
   unattendedKey?: string
   bootKey?: string
   startupTasks?: Mock<() => void>
+  apiKeysFromEnv?: Partial<Record<ApiKeyName, string>>
+  configMode?: 'env-supplied' | 'self-configured'
 }
 
 export async function build(
@@ -85,6 +88,8 @@ export async function build(
     dataDir,
     unattendedKey: options.unattendedKey,
     passphraseKdf: FAST.passphraseKdf,
+    configMode: options.configMode ?? 'self-configured',
+    apiKeysFromEnv: options.apiKeysFromEnv,
   })
   app.decorate('fx', {} as never)
   app.decorate('priceService', {} as never)
@@ -131,10 +136,10 @@ export class Client {
   #csrf = ''
   constructor(private readonly app: FastifyInstance) {}
 
-  async request(method: 'GET' | 'POST', url: string, payload?: unknown) {
+  async request(method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, payload?: unknown) {
     const headers: Record<string, string> = {}
     if (this.#cookie) headers.cookie = this.#cookie
-    if (method === 'POST') {
+    if (method !== 'GET') {
       // The token is bound to the session, and signing in replaces the session.
       await this.#fetchCsrf()
       headers['csrf-token'] = this.#csrf
@@ -147,6 +152,16 @@ export class Client {
     })
     this.#absorbCookies(res.headers['set-cookie'])
     return res
+  }
+
+  /** Like request(), but never sends the CSRF token. */
+  async requestWithoutCsrf(method: 'POST' | 'PUT' | 'DELETE', url: string, payload?: unknown) {
+    return this.app.inject({
+      method,
+      url,
+      headers: this.#cookie ? { cookie: this.#cookie } : {},
+      ...(payload === undefined ? {} : { payload: payload as object }),
+    })
   }
 
   async #fetchCsrf() {

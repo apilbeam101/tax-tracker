@@ -18,7 +18,7 @@ import { authRoutes } from './routes/auth.ts'
 import { healthRoute } from './routes/health.ts'
 import { createFxService } from './services/fx/index.ts'
 import { createPriceService } from './services/prices/cache.ts'
-import { createTiingoProvider } from './services/prices/tiingo.ts'
+import { createKeyedTiingoProvider } from './services/prices/tiingo.ts'
 import { createYahooProvider } from './services/prices/yahoo.ts'
 import { backfillRealisedProjections, recalcAllInstruments } from './services/tax/recalc.ts'
 import { backfillAutoWithholding } from './services/tax/withholding.ts'
@@ -65,7 +65,15 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
   const db = await initDb(config.dbPath)
   app.decorate('db', db)
 
-  app.decorate('runtime', { dataDir: config.dataDir, unattendedKey: config.encryptionKey })
+  app.decorate('runtime', {
+    dataDir: config.dataDir,
+    unattendedKey: config.encryptionKey,
+    configMode: config.configMode,
+    apiKeysFromEnv: {
+      TIINGO_API_KEY: config.tiingoApiKey,
+      ALPHA_VANTAGE_API_KEY: config.alphaVantageApiKey,
+    },
+  })
 
   // ── Lock state ───────────────────────────────────────────────────────────────
   // Created before the stores: they encrypt and decrypt through the keyring.
@@ -97,7 +105,7 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
 
   const priceStore = createPriceStore(db, cipher)
   const priceProviders = [
-    ...(config.tiingoApiKey ? [createTiingoProvider(config.tiingoApiKey)] : []),
+    createKeyedTiingoProvider(() => app.apiKeys.get('TIINGO_API_KEY')),
     createYahooProvider(),
   ]
   app.decorate('priceService', createPriceService(priceStore, priceProviders))

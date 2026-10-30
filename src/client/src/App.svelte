@@ -6,10 +6,12 @@
   import Dashboard from './routes/Dashboard.svelte'
   import Upgrade from './routes/Upgrade.svelte'
   import RecoveryKey from './routes/RecoveryKey.svelte'
+  import ApiKeys from './routes/ApiKeys.svelte'
+  import type { SetupResult } from './routes/Setup.svelte'
   import type { UpgradeResult } from './routes/Upgrade.svelte'
   import { apiFetch, clearCsrfToken, watchSessionLoss } from './lib/api.ts'
 
-  type AppState = 'loading' | 'setup' | 'login' | 'recover' | 'upgrade' | 'recovery-key' | 'app'
+  type AppState = 'loading' | 'setup' | 'login' | 'recover' | 'upgrade' | 'recovery-key' | 'api-keys' | 'app'
 
   let state: AppState = $state('loading')
   let currentUser: { username: string } | null = $state(null)
@@ -88,8 +90,26 @@
     }
   }
 
-  function onSetupComplete() {
-    state = 'login'
+  async function onSetupComplete(result: SetupResult) {
+    currentUser = result.user
+    locked = false
+    clearCsrfToken()
+    if (!result.recoveryKey) {
+      await refreshStatus()
+      state = stateAfterSignIn()
+      return
+    }
+    canRecover = true
+    freshKey = {
+      recoveryKey: result.recoveryKey,
+      safetyCopy: '',
+      plaintextCopies: [],
+      scrubbed: true,
+      unattended: result.unattended,
+      firstRun: true,
+    }
+    upgrade = 'confirm'
+    state = 'recovery-key'
   }
 
   async function onLoginSuccess(user: { username: string }) {
@@ -107,9 +127,10 @@
   }
 
   function onKeyConfirmed() {
+    const firstRun = freshKey?.firstRun === true
     freshKey = null
     upgrade = 'none'
-    state = 'app'
+    state = firstRun ? 'api-keys' : 'app'
   }
 
   async function onLogout() {
@@ -127,7 +148,7 @@
   <div class="loading">Loading…</div>
 
 {:else if state === 'setup'}
-  <Setup oncomplete={onSetupComplete} />
+  <Setup {unattendedKeyAvailable} oncomplete={onSetupComplete} onalready={() => void init()} />
 
 {:else if state === 'login'}
   <Login
@@ -157,6 +178,13 @@
 
 {:else if state === 'recovery-key'}
   <RecoveryKey {freshKey} onconfirmed={onKeyConfirmed} onlater={() => (state = 'app')} />
+
+{:else if state === 'api-keys'}
+  <div class="step">
+    <div class="step-card">
+      <ApiKeys ondone={() => (state = 'app')} />
+    </div>
+  </div>
 
 {:else}
   <Dashboard user={currentUser} onlogout={onLogout} />
@@ -277,6 +305,14 @@
     font-family: system-ui, -apple-system, sans-serif;
     background: var(--bg);
     color: var(--text);
+  }
+  .step {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 1rem;
+  }
+  .step-card {
+    background: var(--surface); border-radius: 8px; padding: 2rem;
+    width: 100%; max-width: 620px; box-shadow: 0 2px 12px var(--shadow);
   }
   .loading {
     display: flex;

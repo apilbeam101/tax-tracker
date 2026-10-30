@@ -4,13 +4,14 @@
   import Holdings from './Holdings.svelte'
   import Projections from './Projections.svelte'
   import ImportExport from './ImportExport.svelte'
+  import ApiKeys from './ApiKeys.svelte'
   import LineChart from '../lib/LineChart.svelte'
   import BarChart from '../lib/BarChart.svelte'
   import { onMount } from 'svelte'
   import { maskedStore } from '../lib/masked.svelte.ts'
   import { themeStore } from '../lib/theme.svelte.ts'
 
-  type Page = 'dashboard' | 'transactions' | 'holdings' | 'tax' | 'projections' | 'import-export'
+  type Page = 'dashboard' | 'transactions' | 'holdings' | 'tax' | 'projections' | 'import-export' | 'settings'
 
   let {
     user,
@@ -168,6 +169,7 @@
       <a href="#tax" class:active={page === 'tax'} onclick={() => page = 'tax'}>Tax Summary</a>
       <a href="#projections" class:active={page === 'projections'} onclick={() => page = 'projections'}>Projections</a>
       <a href="#import-export" class:active={page === 'import-export'} onclick={() => page = 'import-export'}>Import / Export</a>
+      <a href="#settings" class:active={page === 'settings'} onclick={() => page = 'settings'}>Settings</a>
     </nav>
     <div class="user-menu">
       <button type="button" class="mask-btn" class:active={maskedStore.masked} onclick={() => maskedStore.toggle()} title="Toggle number masking">
@@ -192,6 +194,8 @@
       <Projections />
     {:else if page === 'import-export'}
       <ImportExport />
+    {:else if page === 'settings'}
+      <ApiKeys />
     {:else}
 
       <!-- KPI cards -->

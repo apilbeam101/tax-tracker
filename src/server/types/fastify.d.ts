@@ -10,6 +10,7 @@ import type {
 } from '../repositories/index.ts'
 import type { CgtDisposalStore } from '../repositories/sqlite/CgtDisposalStore.ts'
 import type { S104PoolStore } from '../repositories/sqlite/S104PoolStore.ts'
+import type { ApiKeyName, ApiKeys } from '../services/api-keys.ts'
 import type { FxService } from '../services/fx/index.ts'
 import type { PriceService } from '../services/prices/cache.ts'
 
@@ -20,6 +21,9 @@ export interface RuntimeSettings {
   unattendedKey?: string | undefined
   /** Tests lower the passphrase KDF cost; production leaves it unset. */
   passphraseKdf?: Argon2idParams | undefined
+  configMode?: 'env-supplied' | 'self-configured' | undefined
+  /** API keys the deployment supplies; they take precedence over, and lock, the UI fields. */
+  apiKeysFromEnv?: Partial<Record<ApiKeyName, string | undefined>> | undefined
 }
 
 declare module 'fastify' {
@@ -34,6 +38,7 @@ declare module 'fastify' {
     s104Pools: S104PoolStore
     vestSchedules: VestScheduleStore
     appSecrets: AppSecretStore
+    apiKeys: ApiKeys
     fx: FxService
     priceService: PriceService
   }
