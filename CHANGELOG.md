@@ -30,6 +30,13 @@ All notable changes to this project are documented in this file. Format follows 
 - The client shows a notice on the sign-in page when the data is locked, and any data request that returns `423` (locked) or `401` (session ended) returns the app to sign-in (`src/client/src/lib/api.ts`).
 - `GET /api/auth/status` reports `locked` and `unlockMode` (`none`, `passphrase` or `unattended`). `HttpError` takes an optional `code`, which the error handler returns alongside `error` and `message`.
 - API keys entered through the UI are stored in a new encrypted `app_secret` table.
+- Upgrade flow for existing databases: a signed-in user migrates an existing database to the current storage format from an upgrade screen (`src/client/src/routes/Upgrade.svelte`) by confirming their passphrase, or defers it with "Not now".
+  - Automatic unlock with `ENCRYPTION_KEY` is set up only if the user opts in.
+  - The recovery key screen (`src/client/src/routes/RecoveryKey.svelte`) shows the key once and requires it to be typed back before the safety copy made before the upgrade is removed. A user who did not save the key can create a new one.
+  - Requests against an already-upgraded database return code `ALREADY_ENCRYPTED`.
+- Endpoints `POST /api/auth/upgrade`, `POST /api/auth/upgrade/confirm` and `POST /api/auth/recovery-key/rotate`.
+  - `GET /api/auth/status` adds `upgrade` (`none`, `available` or `confirm`) and `unattendedKeyAvailable`.
+  - The upgrade lists older copies of the database (backup-script output, `.bak` files, Ghostfolio exports) so the user can review them.
 
 ### Changed
 
@@ -49,6 +56,11 @@ All notable changes to this project are documented in this file. Format follows 
 - Ticker lookups and uniqueness use a keyed blind index (`instrument.ticker_bidx`, migration `007_field_encryption.sql`).
 - `backfill-fx`, `fetch-dividends` and `import-ghostfolio` refuse to run against an encrypted database, since they cannot unlock it. Use the app's Import / Export page instead.
 - Startup logs no longer include instrument tickers.
+- The upgrade is verified before it commits, so a failure leaves the database as it was, and the running app switches to the new format in the same step as the commit.
+- After an upgrade, a WAL checkpoint, `VACUUM` and a further checkpoint clear superseded data from the database file and its WAL. The result is verified (a blocked checkpoint counts as not done) and retried at each start until it completes.
+- `secure_delete` is always on, and the database connection sets a busy timeout. Maintenance scripts take the write lock and re-check before writing.
+- `npm run backup` uses SQLite's backup API instead of a file copy, since a plain copy of a WAL database can miss committed transactions.
+- The README and `.env.example` describe `ENCRYPTION_KEY` as an optional automatic-unlock key; it is commented out in `.env.example`.
 
 - Linting moved from ESLint (which had no working config — `npm run lint` failed outright) to Biome. `typescript-eslint`'s peer dependency doesn't yet support this project's TypeScript `^7`, and Biome has no such constraint.
 - `npm run typecheck` now covers `scripts/` in addition to `src/server`/`src/shared` (previously ungated — two pre-existing type errors there are fixed).

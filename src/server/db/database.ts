@@ -35,6 +35,11 @@ export async function initDb(dbPath: string): Promise<Db> {
   // SQLITE_TMPDIR/TMPDIR -- avoids depending on a writable temp directory
   // at all (e.g. under a read-only container filesystem).
   db.exec('PRAGMA temp_store = MEMORY')
+  // Overwrite deleted content with zeros instead of leaving it in freed pages, so data removed
+  // (or re-encrypted) stays removed. Per connection, hence set on every open.
+  db.exec('PRAGMA secure_delete = ON')
+  // Wait briefly for another connection's write lock instead of failing at once.
+  db.exec('PRAGMA busy_timeout = 5000')
 
   await runMigrations(db)
   return db

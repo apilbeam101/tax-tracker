@@ -64,7 +64,8 @@ npm install
 # SESSION_SECRET — at least 32 bytes of random hex
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
-# ENCRYPTION_KEY — 32-byte key for AES-256-GCM field encryption
+# ENCRYPTION_KEY — optional, only for an always-on server that should unlock its data by itself
+# at startup (see the table below). Skip it for a laptop install.
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
@@ -79,7 +80,7 @@ Edit `.env` and fill in:
 | Variable | Required | Description |
 |---|---|---|
 | `SESSION_SECRET` | Yes | 64-char hex string for cookie signing (placeholders and short values are rejected) |
-| `ENCRYPTION_KEY` | No | 64-char hex string for field-level AES-256-GCM encryption |
+| `ENCRYPTION_KEY` | No | 64-char hex string. Optional: when you encrypt the database you can choose to use it to unlock the data automatically at startup. The key then sits next to the data, so leave it unset unless the server must restart unattended |
 | `PORT` | No | Server port (default: `3000`) |
 | `HOST` | No | Bind address (default: `127.0.0.1`) |
 | `DB_PATH` | No | SQLite file path. Takes precedence over `DATA_DIR` |
@@ -120,7 +121,7 @@ After setup, log in with the username and password you created. A 🌙/☀️ to
 cp .env.example .env
 ```
 
-Edit `.env` and fill in **real, generated** `SESSION_SECRET`/`ENCRYPTION_KEY` values (step 2 above) — the app refuses to start if either still holds the `CHANGE_ME` placeholder from `.env.example`.
+Edit `.env` and fill in a **real, generated** `SESSION_SECRET` (step 2 above) — the app refuses to start if it, or an `ENCRYPTION_KEY` you set, still holds the `CHANGE_ME` placeholder.
 
 The container runs as a fixed non-root UID (`10001`), and its SQLite data lives in a directory bind-mounted from the host (`./data`) so it survives a container recreate. That host directory needs to already be owned by that UID before the first run — Docker does not do this for you on a bind mount:
 

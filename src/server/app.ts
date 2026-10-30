@@ -6,6 +6,7 @@ import fastifyStatic from '@fastify/static'
 import type { FastifyInstance } from 'fastify'
 import { config } from './config/env.ts'
 import { packageRoot } from './config/paths.ts'
+import { scrubIfPending } from './crypto/upgrade.ts'
 import { initDb } from './db/database.ts'
 import { errorHandler } from './errors.ts'
 import { registerLockState } from './lock.ts'
@@ -64,6 +65,8 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
   const db = await initDb(config.dbPath)
   app.decorate('db', db)
 
+  app.decorate('runtime', { dataDir: config.dataDir, unattendedKey: config.encryptionKey })
+
   // ── Lock state ───────────────────────────────────────────────────────────────
   // Created before the stores: they encrypt and decrypt through the keyring.
   const lockState = registerLockState(app, {
@@ -100,6 +103,14 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
   app.decorate('priceService', createPriceService(priceStore, priceProviders))
 
   await lockState.boot()
+
+  // An upgrade whose clean-up did not finish (disk full, file held open by another program) is
+  // retried here, before any request is served, until it completes.
+  if (scrubIfPending(db) === false) {
+    app.log.warn(
+      'Old unencrypted data may still be in free pages of the database file: the clean-up after encryption did not complete and will be retried at the next start.',
+    )
+  }
 
   // ── Static files (compiled Svelte SPA) ──────────────────────────────────────
   await app.register(fastifyStatic, {

@@ -130,6 +130,24 @@ function insertSlot(db: Db, r: PreparedSlot): void {
 // Replace the slot of this type, keeping created_at. Synchronous, so it can sit inside a
 // caller's transaction; the slow part happens in the prepare*() functions beforehand.
 export function applySlot(db: Db, r: PreparedSlot, action = `key_slot.${r.slotType}.set`): void {
+  // The slot and its audit entry stand or fall together: a slot replaced with no record of it, or
+  // a failed audit insert after the old slot was already gone, would both be wrong.
+  db.exec('SAVEPOINT apply_slot')
+  try {
+    writeSlotAndAudit(db, r, action)
+    db.exec('RELEASE apply_slot')
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK TO apply_slot')
+      db.exec('RELEASE apply_slot')
+    } catch {
+      /* ignore secondary rollback failure */
+    }
+    throw err
+  }
+}
+
+function writeSlotAndAudit(db: Db, r: PreparedSlot, action: string): void {
   db.prepare(
     `INSERT INTO key_slot (tenant_id, slot_type, kdf_params, salt, wrapped_dek, key_id)
      VALUES (?, ?, ?, ?, ?, ?)
@@ -282,38 +300,65 @@ export async function createKeySlots(
   passphrase: string,
   options: KeySlotOptions = {},
 ): Promise<CreatedKeySlots> {
-  if (hasKeySlots(db)) throw new ConflictError('Key slots already exist')
+  if (hasKeySlots(db)) throw new ConflictError('Key slots already exist', 'ALREADY_ENCRYPTED')
 
+  const { slots, ...created } = await prepareInitialSlots(passphrase, options)
+  try {
+    insertInitialSlots(db, slots)
+  } catch (err) {
+    wipe(created.dek)
+    throw err
+  }
+  return created
+}
+
+export interface InitialSlots extends CreatedKeySlots {
+  slots: PreparedSlot[]
+}
+
+// The slow half of creating a database's first key slots (argon2), split from the write so the
+// caller can run the write inside its own transaction without holding it open across an await.
+// With an unattended key, that slot is created too.
+export async function prepareInitialSlots(
+  passphrase: string,
+  options: KeySlotOptions & { unattendedKey?: string | undefined } = {},
+): Promise<InitialSlots> {
   const dek = randomBytes(KEY_LENGTH)
   const recoveryBytes = generateRecoveryKey()
   try {
-    const passphraseSlot = await preparePassphraseSlot(dek, passphrase, options)
-    const recoverySlot = prepareRecoverySlot(dek, recoveryBytes)
-
-    db.exec('SAVEPOINT create_key_slots')
-    try {
-      insertSlot(db, passphraseSlot)
-      insertSlot(db, recoverySlot)
-      audit(db, 'key_slot.create')
-      db.exec('RELEASE create_key_slots')
-    } catch (err) {
-      try {
-        db.exec('ROLLBACK TO create_key_slots')
-        db.exec('RELEASE create_key_slots')
-      } catch {
-        /* ignore secondary rollback failure */
-      }
-      if (err instanceof Error && /UNIQUE constraint failed/.test(err.message)) {
-        throw new ConflictError('Key slots already exist')
-      }
-      throw err
-    }
-    return { dek, keyId: keyIdOf(dek), recoveryKey: formatRecoveryKey(recoveryBytes) }
+    const slots = [
+      await preparePassphraseSlot(dek, passphrase, options),
+      prepareRecoverySlot(dek, recoveryBytes),
+    ]
+    if (options.unattendedKey) slots.push(await prepareUnattendedSlot(dek, options.unattendedKey))
+    return { dek, keyId: keyIdOf(dek), recoveryKey: formatRecoveryKey(recoveryBytes), slots }
   } catch (err) {
     wipe(dek)
     throw err
   } finally {
     wipe(recoveryBytes)
+  }
+}
+
+// Inserts the slots with plain INSERTs (no upsert) so a concurrent second setup fails instead of
+// overwriting the first. Uses a SAVEPOINT, so it also works inside the caller's transaction.
+export function insertInitialSlots(db: Db, slots: PreparedSlot[]): void {
+  db.exec('SAVEPOINT create_key_slots')
+  try {
+    for (const slot of slots) insertSlot(db, slot)
+    audit(db, 'key_slot.create')
+    db.exec('RELEASE create_key_slots')
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK TO create_key_slots')
+      db.exec('RELEASE create_key_slots')
+    } catch {
+      /* ignore secondary rollback failure */
+    }
+    if (err instanceof Error && /UNIQUE constraint failed/.test(err.message)) {
+      throw new ConflictError('Key slots already exist', 'ALREADY_ENCRYPTED')
+    }
+    throw err
   }
 }
 

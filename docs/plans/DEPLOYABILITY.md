@@ -109,8 +109,10 @@ Key handling has to work the same way across every install path before self-conf
   1. Create the key slots if absent. Existing installs get a one-time screen that confirms the passphrase and shows the recovery key.
   2. Rewrite every classified column into the current format and build the blind indexes.
   3. Then run `PRAGMA secure_delete = ON` (kept on permanently), `wal_checkpoint(TRUNCATE)` and `VACUUM`, so no superseded values remain in freed pages or the WAL.
-- Backups taken before the upgrade aren't in the current format. The app lists them and prompts the user to replace them with a fresh backup and delete the old ones; any kept are flagged with a badge.
-- An automatic pre-upgrade backup (Phase 4) makes a failed upgrade recoverable. It's removed once the upgrade is verified, and the user is told at each step.
+- The upgrade is user-initiated (a signed-in user confirms their passphrase on an "Encrypt your data" screen; "Not now" defers it to the next sign-in). It verifies every rewritten value by reading it back before it commits, so a failure or interruption leaves the database exactly as it was. The running app starts encrypting in the same synchronous step as the commit, so no request can write a plaintext row in between. If `ENCRYPTION_KEY` is configured, the user may opt in to also creating the unattended slot; it is never created implicitly.
+- Backups taken before the upgrade aren't in the current format. The app lists them (backup-script output, `.bak` files, Ghostfolio exports, other leftover safety copies) and prompts the user to delete or replace them; a backup that carries key slots is not listed. A persistent badge is a Phase 4 item.
+- Before anything changes, a plaintext safety copy is written through SQLite's backup API (not a file copy) so a failed upgrade is recoverable. It is removed only after the user types the recovery key back. Whether the recovery key was confirmed is recorded in the database (audit log), not inferred from files, so deleting the safety copy cannot hide an unconfirmed key; a user who closed the window can create a new recovery key and confirm that.
+- The clean-up (checkpoint, `VACUUM`, checkpoint) is verified rather than assumed: a blocked checkpoint or leftover free pages count as not done. A pending clean-up is recorded and retried at every start until it completes.
 
 ### 2e. Self-configuring first run (optional mode)
 Two config modes, chosen explicitly:

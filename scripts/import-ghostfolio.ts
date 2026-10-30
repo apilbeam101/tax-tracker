@@ -130,7 +130,10 @@ const insertAudit = db.prepare(`
   VALUES (?, ?, 'txn.create', 'txn', ?, ?)
 `)
 
-db.exec('BEGIN')
+// Take the write lock first, then re-check: the app may have encrypted the database since this
+// script started, and everything below would then write plaintext into encrypted columns.
+db.exec('BEGIN IMMEDIATE')
+refuseIfEncrypted(db, 'import-ghostfolio')
 try {
   for (const activity of raw.activities) {
     // Resolve tag names for this activity

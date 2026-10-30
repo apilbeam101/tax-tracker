@@ -4,9 +4,12 @@
   import Login from './routes/Login.svelte'
   import Recover from './routes/Recover.svelte'
   import Dashboard from './routes/Dashboard.svelte'
+  import Upgrade from './routes/Upgrade.svelte'
+  import RecoveryKey from './routes/RecoveryKey.svelte'
+  import type { UpgradeResult } from './routes/Upgrade.svelte'
   import { apiFetch, clearCsrfToken, watchSessionLoss } from './lib/api.ts'
 
-  type AppState = 'loading' | 'setup' | 'login' | 'recover' | 'app'
+  type AppState = 'loading' | 'setup' | 'login' | 'recover' | 'upgrade' | 'recovery-key' | 'app'
 
   let state: AppState = $state('loading')
   let currentUser: { username: string } | null = $state(null)
@@ -14,6 +17,12 @@
   let locked = $state(false)
   // Key slots exist, so a recovery key can reset a forgotten passphrase.
   let canRecover = $state(false)
+  // 'available': not encrypted yet. 'confirm': encrypted, recovery key not yet proven.
+  let upgrade: 'none' | 'available' | 'confirm' = $state('none')
+  let upgradeSkipped = $state(false)
+  let unattendedKeyAvailable = $state(false)
+  // Set only in the session that ran the upgrade: the recovery key is never shown again.
+  let freshKey: UpgradeResult | null = $state(null)
 
   // Asks the server where things stand, e.g. whether signing out re-locked the data.
   async function refreshStatus() {
@@ -21,22 +30,35 @@
       const data = await (await fetch('/api/auth/status')).json()
       locked = !!data.locked
       canRecover = data.unlockMode !== 'none'
+      upgrade = data.upgrade ?? 'none'
+      unattendedKeyAvailable = !!data.unattendedKeyAvailable
     } catch {
       /* keep the previous values */
     }
+  }
+
+  function stateAfterSignIn(): AppState {
+    if (upgrade === 'confirm') return 'recovery-key'
+    if (upgrade === 'available' && !upgradeSkipped) return 'upgrade'
+    return 'app'
   }
 
   onMount(() => {
     watchSessionLoss({
       locked: () => {
         currentUser = null
+        freshKey = null
         locked = true
         canRecover = true
         state = 'login'
       },
       ended: () => {
-        if (state !== 'app') return
+        if (state === 'loading' || state === 'setup' || state === 'login' || state === 'recover') {
+          return
+        }
         currentUser = null
+        // The recovery key from the upgrade is shown once, in the session that made it.
+        freshKey = null
         state = 'login'
         void refreshStatus()
       },
@@ -51,13 +73,15 @@
       const data = await res.json()
       locked = !!data.locked
       canRecover = data.unlockMode !== 'none'
+      upgrade = data.upgrade ?? 'none'
+      unattendedKeyAvailable = !!data.unattendedKeyAvailable
       if (data.setupRequired) {
         state = 'setup'
       } else if (!data.authenticated) {
         state = 'login'
       } else {
         currentUser = data.user
-        state = 'app'
+        state = stateAfterSignIn()
       }
     } catch {
       state = 'login'
@@ -68,10 +92,23 @@
     state = 'login'
   }
 
-  function onLoginSuccess(user: { username: string }) {
+  async function onLoginSuccess(user: { username: string }) {
     currentUser = user
     locked = false
     clearCsrfToken()
+    await refreshStatus()
+    state = stateAfterSignIn()
+  }
+
+  function onUpgraded(result: UpgradeResult) {
+    freshKey = result
+    upgrade = 'confirm'
+    state = 'recovery-key'
+  }
+
+  function onKeyConfirmed() {
+    freshKey = null
+    upgrade = 'none'
     state = 'app'
   }
 
@@ -80,6 +117,7 @@
     if (!res.ok) return
     clearCsrfToken()
     currentUser = null
+    freshKey = null
     state = 'login'
     await refreshStatus()
   }
@@ -101,6 +139,24 @@
 
 {:else if state === 'recover'}
   <Recover onsuccess={onLoginSuccess} oncancel={() => (state = 'login')} />
+
+{:else if state === 'upgrade'}
+  <Upgrade
+    {unattendedKeyAvailable}
+    onupgraded={onUpgraded}
+    onalready={async () => {
+      await refreshStatus()
+      freshKey = null
+      state = 'recovery-key'
+    }}
+    onskip={() => {
+      upgradeSkipped = true
+      state = 'app'
+    }}
+  />
+
+{:else if state === 'recovery-key'}
+  <RecoveryKey {freshKey} onconfirmed={onKeyConfirmed} onlater={() => (state = 'app')} />
 
 {:else}
   <Dashboard user={currentUser} onlogout={onLogout} />

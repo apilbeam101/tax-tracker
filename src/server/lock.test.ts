@@ -1,11 +1,6 @@
-import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
-import fastifyCsrfProtection from '@fastify/csrf-protection'
-import fastifyRateLimit from '@fastify/rate-limit'
-import Fastify, { type FastifyInstance } from 'fastify'
-import { afterEach, beforeAll, describe, expect, it, type Mock, vi } from 'vitest'
-import { hashPassword, verifyPassword } from './auth/password.ts'
+import Fastify from 'fastify'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { verifyPassword } from './auth/password.ts'
 import { Keyring } from './crypto/keyring.ts'
 import {
   createKeySlots,
@@ -14,175 +9,25 @@ import {
   unlockWithPassphrase,
 } from './crypto/keyslots.ts'
 import { formatRecoveryKey } from './crypto/recovery.ts'
-import type { SessionTracker } from './crypto/session-tracker.ts'
+import { createTestDb } from './db/testdb.ts'
 import { errorHandler, LockedError } from './errors.ts'
-import { registerLockState, unlockAtBoot } from './lock.ts'
-import { registerRepositories } from './repositories/register.ts'
-import { apiRoutes } from './routes/api.ts'
-import { authRoutes } from './routes/auth.ts'
-import { registerSession } from './session.ts'
-
-const MIGRATIONS_DIR = join(import.meta.dirname, 'db', 'migrations')
-const FAST = {
-  passphraseKdf: { kdf: 'argon2id', memoryKiB: 64, timeCost: 1, parallelism: 1 },
-} as const
-const PASSPHRASE = 'a reasonably long passphrase'
-const NEW_PASSPHRASE = 'a different long passphrase'
-const HOUR = 60 * 60 * 1000
-const tick = () => new Promise((resolve) => setImmediate(resolve))
-
-let passphraseHash: string
-
-beforeAll(async () => {
-  passphraseHash = await hashPassword(PASSPHRASE)
-})
-
-function setupDb(): DatabaseSync {
-  const db = new DatabaseSync(':memory:')
-  db.exec('PRAGMA foreign_keys = ON')
-  for (const file of readdirSync(MIGRATIONS_DIR)
-    .filter((f) => f.endsWith('.sql'))
-    .sort()) {
-    db.exec(readFileSync(join(MIGRATIONS_DIR, file), 'utf-8'))
-  }
-  db.prepare('INSERT INTO user (tenant_id, username, password_hash) VALUES (1, ?, ?)').run(
-    'admin',
-    passphraseHash,
-  )
-  return db
-}
-
-interface Harness {
-  app: FastifyInstance
-  db: DatabaseSync
-  keyring: Keyring
-  tracker: SessionTracker
-  clock: { now: number }
-  startupTasks: Mock<() => void>
-}
-
-const UNATTENDED_KEY = 'a-deployment-supplied-key-of-32-chars-or-more'
-
-// Uses the same registerLockState() as buildApp(), so the wiring under test is the wiring that
-// runs; only the stores and static files are stubbed out.
-async function build(options: {
-  slots: boolean
-  unattendedKey?: string
-  bootKey?: string
-  startupTasks?: Mock<() => void>
-}): Promise<{ h: Harness; dek?: Buffer | undefined; recoveryKey?: string | undefined }> {
-  const db = setupDb()
-  let dek: Buffer | undefined
-  let recoveryKey: string | undefined
-  if (options.slots) {
-    const created = await createKeySlots(db, PASSPHRASE, FAST)
-    dek = created.dek
-    recoveryKey = created.recoveryKey
-    if (options.unattendedKey) await setUnattendedKey(db, dek, options.unattendedKey)
-  }
-
-  const app = Fastify()
-  app.setErrorHandler(errorHandler)
-  await app.register(fastifyRateLimit, { global: true, max: 200, timeWindow: '1 minute' })
-  await registerSession(app, { secret: 's'.repeat(64), secureCookies: false })
-  await app.register(fastifyCsrfProtection, { sessionPlugin: '@fastify/session' })
-
-  app.decorate('db', db)
-  app.decorate('fx', {} as never)
-  app.decorate('priceService', {} as never)
-
-  const clock = { now: 1_000_000 }
-  const startupTasks = options.startupTasks ?? vi.fn()
-  const lockState = registerLockState(app, {
-    db,
-    encryptionKey: options.bootKey ?? options.unattendedKey,
-    startupTasks,
-    now: () => clock.now,
-  })
-  // Same order as buildApp(): keyring, then the stores built on it, then boot.
-  registerRepositories(app, db)
-  await lockState.boot()
-
-  app.get('/health', async () => ({ status: 'ok' }))
-  await app.register(authRoutes, { prefix: '/api/auth' })
-  await app.register(apiRoutes, { prefix: '/api' })
-  await app.ready()
-
-  return {
-    h: { app, db, keyring: app.keyring, tracker: app.sessionTracker, clock, startupTasks },
-    dek,
-    recoveryKey,
-  }
-}
-
-// A tiny cookie-and-CSRF-aware client, one per browser session.
-class Client {
-  #cookie = ''
-  #csrf = ''
-  constructor(private readonly app: FastifyInstance) {}
-
-  async request(method: 'GET' | 'POST', url: string, payload?: unknown) {
-    const headers: Record<string, string> = {}
-    if (this.#cookie) headers.cookie = this.#cookie
-    if (method === 'POST') {
-      // The token is bound to the session, and signing in replaces the session.
-      await this.#fetchCsrf()
-      headers['csrf-token'] = this.#csrf
-    }
-    const res = await this.app.inject({
-      method,
-      url,
-      headers,
-      ...(payload === undefined ? {} : { payload: payload as object }),
-    })
-    this.#absorbCookies(res.headers['set-cookie'])
-    return res
-  }
-
-  async #fetchCsrf() {
-    const res = await this.app.inject({
-      method: 'GET',
-      url: '/api/auth/csrf',
-      headers: this.#cookie ? { cookie: this.#cookie } : {},
-    })
-    this.#absorbCookies(res.headers['set-cookie'])
-    this.#csrf = (res.json() as { csrfToken: string }).csrfToken
-  }
-
-  #absorbCookies(header: string | string[] | undefined) {
-    if (!header) return
-    const pairs = (Array.isArray(header) ? header : [header]).map((c) => c.split(';')[0] as string)
-    const jar = new Map(
-      this.#cookie
-        .split('; ')
-        .filter(Boolean)
-        .map((p) => p.split('=') as [string, string]),
-    )
-    for (const pair of pairs) {
-      const [name, ...value] = pair.split('=')
-      jar.set(name as string, value.join('='))
-    }
-    this.#cookie = [...jar].map(([k, v]) => `${k}=${v}`).join('; ')
-  }
-
-  login(password = PASSPHRASE) {
-    return this.request('POST', '/api/auth/login', { username: 'admin', password })
-  }
-  logout() {
-    return this.request('POST', '/api/auth/logout')
-  }
-  me() {
-    return this.request('GET', '/api/me')
-  }
-  status() {
-    return this.request('GET', '/api/auth/status')
-  }
-}
+import { unlockAtBoot } from './lock.ts'
+import {
+  build,
+  Client,
+  FAST,
+  type Harness,
+  HOUR,
+  NEW_PASSPHRASE,
+  PASSPHRASE,
+  tick,
+  UNATTENDED_KEY,
+} from './test-harness.ts'
 
 let current: Harness | undefined
 
 afterEach(async () => {
-  await current?.app.close()
+  await current?.dispose()
   current = undefined
 })
 
@@ -715,7 +560,7 @@ describe('changing the passphrase while signed in', () => {
 
 describe('unlockAtBoot', () => {
   async function bootDb() {
-    const db = setupDb()
+    const db = createTestDb()
     const { dek } = await createKeySlots(db, PASSPHRASE, FAST)
     return { db, dek }
   }
@@ -723,7 +568,7 @@ describe('unlockAtBoot', () => {
   it('leaves a database without key slots unprotected', async () => {
     const keyring = new Keyring({ protected: false })
     const mode = await unlockAtBoot({
-      db: setupDb(),
+      db: createTestDb(),
       keyring,
       encryptionKey: undefined,
       warn: vi.fn(),

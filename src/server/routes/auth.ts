@@ -1,12 +1,23 @@
+import { basename, join } from 'node:path'
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify'
 import { requireAuth, type SessionUser } from '../auth/middleware.ts'
 import { DUMMY_HASH, hashPassword, verifyPassword } from '../auth/password.ts'
 import {
   applySlot,
   preparePassphraseSlot,
+  rotateRecoveryKey,
   unlockWithPassphrase,
   unlockWithRecoveryKey,
 } from '../crypto/keyslots.ts'
+import {
+  ALREADY_ENCRYPTED,
+  ALREADY_ENCRYPTED_CODE,
+  listPlaintextCopies,
+  recordRecoveryKeyConfirmed,
+  recoveryKeyNeedsConfirmation,
+  removePreEncryptionBackups,
+  upgradeToEncrypted,
+} from '../crypto/upgrade.ts'
 import { ConflictError, UnauthorizedError } from '../errors.ts'
 import { lockedBody, requireLiveSession } from '../lock.ts'
 
@@ -101,6 +112,14 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
   }
 
+  const backupDir = join(app.runtime.dataDir, 'backups')
+
+  function upgradeState(userCount: number): 'none' | 'available' | 'confirm' {
+    if (userCount === 0) return 'none'
+    if (!app.keyring.isProtected) return 'available'
+    return recoveryKeyNeedsConfirmation(app.db) ? 'confirm' : 'none'
+  }
+
   function unlockFailed(reply: FastifyReply) {
     return reply
       .status(423)
@@ -128,6 +147,12 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       user: live ? (req.session.user ?? null) : null,
       locked: keyring.isLocked,
       unlockMode: !keyring.isProtected ? 'none' : keyring.isPermanent ? 'unattended' : 'passphrase',
+      // 'available': the data is not encrypted yet. 'confirm': it was encrypted but the user has
+      // not yet proved they hold the recovery key, so the plaintext safety copy still exists.
+      upgrade: live ? upgradeState(userCount) : 'none',
+      // Whether the server has an ENCRYPTION_KEY the user could opt into using for automatic
+      // unlock when encrypting.
+      unattendedKeyAvailable: live && !keyring.isProtected && Boolean(app.runtime.unattendedKey),
     }
   })
 
@@ -323,6 +348,136 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       }
       app.sessionTracker.retainOnly(req.session.sessionId)
       return { ok: true }
+    },
+  )
+
+  const rateLimited = { max: 5, timeWindow: '15 minutes' }
+  const signedIn = [requireAuth, requireLiveSession, app.csrfProtection]
+
+  /**
+   * POST /api/auth/upgrade
+   * Encrypts an existing, unencrypted database. Needs the passphrase again (it becomes the
+   * passphrase key slot) and returns the recovery key, which is shown once. A plaintext safety
+   * copy is kept until /upgrade/confirm.
+   */
+  app.post<{ Body: { passphrase: string; unattended?: boolean } }>(
+    '/upgrade',
+    {
+      config: { rateLimit: { max: 3, timeWindow: '15 minutes' } },
+      preHandler: signedIn,
+      schema: {
+        body: {
+          type: 'object',
+          required: ['passphrase'],
+          properties: {
+            passphrase: { type: 'string', maxLength: MAX_SECRET_LENGTH },
+            unattended: { type: 'boolean' },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      if (app.keyring.isProtected)
+        throw new ConflictError(ALREADY_ENCRYPTED, ALREADY_ENCRYPTED_CODE)
+      const row = singleUser()
+      if (!row || req.session.user?.id !== row.id) throw new UnauthorizedError()
+      if (!(await verifyPassword(row.password_hash, req.body.passphrase))) {
+        return reply.status(401).send({ error: 'Passphrase is incorrect' })
+      }
+
+      // ENCRYPTION_KEY becomes an automatic-unlock slot only when the user asks for it: it sits
+      // in the server's environment next to the data, so it trades protection for convenience.
+      const unattendedKey = req.body.unattended ? app.runtime.unattendedKey : undefined
+      if (req.body.unattended && !unattendedKey) {
+        throw new ConflictError('No ENCRYPTION_KEY is configured on the server')
+      }
+
+      const result = await upgradeToEncrypted(app.db, app.keyring, {
+        passphrase: req.body.passphrase,
+        backupDir,
+        unattendedKey,
+        // The passphrase was checked against the login hash before the slow preparation; if it
+        // was changed in another tab since, the slot would not match what the user can sign in with.
+        beforeCommit: () => {
+          const current = singleUser()
+          if (current?.password_hash !== row.password_hash) {
+            throw new ConflictError('Your passphrase changed while encrypting. Please try again.')
+          }
+        },
+        ...(app.runtime.passphraseKdf ? { passphraseKdf: app.runtime.passphraseKdf } : {}),
+      })
+      // The data key is new, so no session opened before this one is trusted with it.
+      app.sessionTracker.retainOnly(req.session.sessionId)
+      const safetyCopy = basename(result.backupPath)
+      reply.header('Cache-Control', 'no-store')
+      return {
+        recoveryKey: result.recoveryKey,
+        safetyCopy,
+        plaintextCopies: listPlaintextCopies(app.runtime.dataDir, backupDir, {
+          exceptSafetyCopy: safetyCopy,
+        }),
+        scrubbed: result.scrubbed,
+        unattended: Boolean(unattendedKey),
+      }
+    },
+  )
+
+  /**
+   * POST /api/auth/upgrade/confirm
+   * The user types the recovery key back. Only then is the plaintext safety copy removed.
+   */
+  app.post<{ Body: { recoveryKey: string } }>(
+    '/upgrade/confirm',
+    {
+      config: { rateLimit: rateLimited },
+      preHandler: signedIn,
+      schema: {
+        body: {
+          type: 'object',
+          required: ['recoveryKey'],
+          properties: { recoveryKey: { type: 'string', maxLength: 200 } },
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!app.keyring.isProtected) throw new ConflictError('This database is not encrypted yet')
+      const dek = await unlockWithRecoveryKey(app.db, req.body.recoveryKey)
+      if (!dek) return reply.status(401).send({ error: 'That is not your recovery key' })
+      dek.fill(0)
+      recordRecoveryKeyConfirmed(app.db)
+      return {
+        removed: removePreEncryptionBackups(backupDir),
+        plaintextCopies: listPlaintextCopies(app.runtime.dataDir, backupDir),
+      }
+    },
+  )
+
+  /**
+   * POST /api/auth/recovery-key/rotate
+   * Replaces a lost or never-saved recovery key. The old one stops working immediately.
+   */
+  app.post<{ Body: { currentPassword: string } }>(
+    '/recovery-key/rotate',
+    {
+      config: { rateLimit: rateLimited },
+      preHandler: signedIn,
+      schema: {
+        body: {
+          type: 'object',
+          required: ['currentPassword'],
+          properties: { currentPassword: { type: 'string', maxLength: MAX_SECRET_LENGTH } },
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!app.keyring.isProtected) throw new ConflictError('This database is not encrypted yet')
+      const row = singleUser()
+      if (!row || req.session.user?.id !== row.id) throw new UnauthorizedError()
+      if (!(await verifyPassword(row.password_hash, req.body.currentPassword))) {
+        return reply.status(401).send({ error: 'Current passphrase is incorrect' })
+      }
+      reply.header('Cache-Control', 'no-store')
+      return { recoveryKey: app.keyring.withDek((dek) => rotateRecoveryKey(app.db, dek)) }
     },
   )
 

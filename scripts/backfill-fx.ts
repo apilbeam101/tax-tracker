@@ -86,6 +86,10 @@ for (const row of rows) {
       ? new Big(totalGbp).plus(costsGbp).neg().toFixed(8)
       : new Big(totalGbp).minus(costsGbp).toFixed(8)
 
+    // Each update takes the write lock and re-checks, so an encryption started while this script
+    // is waiting on exchange rates cannot be followed by plaintext writes.
+    db.exec('BEGIN IMMEDIATE')
+    refuseIfEncrypted(db, 'backfill-fx')
     db.prepare(`
       UPDATE txn SET
         fx_rate        = ?,
@@ -105,10 +109,12 @@ for (const row of rows) {
       netGbp,
       row.id,
     )
+    db.exec('COMMIT')
 
     ok++
     if (ok % 10 === 0) process.stdout.write(`.`)
   } catch (err) {
+    if (db.isTransaction) db.exec('ROLLBACK')
     console.error(`\n  ✗ txn #${row.id} (${row.txn_date}): ${(err as Error).message}`)
     failed++
   }
