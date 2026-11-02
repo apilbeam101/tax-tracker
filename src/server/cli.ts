@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process'
 import { applyCliEnv, HELP, type ParsedCli, parseCli, UsageError } from './cli-args.ts'
-import { CliError, errorMessage, promptLine, promptSecret } from './commands/util.ts'
+import { CliError, closePrompts, errorMessage, promptLine, promptSecret } from './commands/util.ts'
 
 function openBrowser(url: string): void {
   const [cmd, args]: [string, string[]] =
@@ -46,9 +46,28 @@ async function init(cli: ParsedCli): Promise<void> {
   console.log(`FX rate policy set to ${policy}. API keys are entered in the app after setup.`)
 }
 
+const dbPassphrase = () => promptSecret('Passphrase or recovery key: ')
+
+async function exportPassphraseTwice(): Promise<string> {
+  const first = await promptSecret('Export passphrase (12 characters or more): ')
+  const again = await promptSecret('Repeat the export passphrase: ')
+  if (first !== again) throw new CliError('The passphrases do not match.')
+  return first
+}
+
+let assumeYes = false
+
+async function confirm(question: string, word: string): Promise<void> {
+  if (assumeYes) return
+  if (!process.stdin.isTTY) {
+    throw new CliError('This needs a terminal to confirm. Pass --yes to confirm without one.')
+  }
+  if ((await promptLine(question, '')) !== word) throw new CliError('Cancelled.')
+}
+
 async function keys(sub: string): Promise<void> {
   const { addUnattended, removeUnattended, rotateRecovery } = await import('./commands/keys.ts')
-  const passphrase = () => promptSecret('Passphrase: ')
+  const passphrase = () => promptSecret('Passphrase or recovery key: ')
   if (sub === 'add-unattended') console.log(await addUnattended(process.env, passphrase))
   else if (sub === 'remove-unattended') console.log(await removeUnattended(process.env, passphrase))
   else {
@@ -95,6 +114,51 @@ async function run(cli: ParsedCli): Promise<void> {
     }
     case 'keys':
       return keys(cli.subcommand as string)
+    case 'restore': {
+      const { runRestore } = await import('./commands/archive.ts')
+      await confirm(
+        'This replaces your current database with the backup. Type "restore" to continue',
+        'restore',
+      )
+      console.log(await runRestore(process.env, cli.file as string))
+      return
+    }
+    case 'export': {
+      const { runExport } = await import('./commands/archive.ts')
+      if (cli.plaintext) {
+        await confirm(
+          'The archive will hold your data unencrypted. Type "plaintext" to continue',
+          'plaintext',
+        )
+      }
+      const out = cli.out ?? `tax-tracker-archive-${new Date().toISOString().slice(0, 10)}.json`
+      const path = await runExport(process.env, dbPassphrase, exportPassphraseTwice, {
+        out,
+        plaintext: cli.plaintext,
+      })
+      console.log(`Archive written to ${path}`)
+      return
+    }
+    case 'import': {
+      const { runImport } = await import('./commands/archive.ts')
+      if (cli.replace) {
+        await confirm(
+          'This deletes your current instruments and transactions (a backup is taken first). Type "replace" to continue',
+          'replace',
+        )
+      }
+      const summary = await runImport(
+        process.env,
+        cli.file as string,
+        dbPassphrase,
+        () => promptSecret('Export passphrase: '),
+        { replace: cli.replace },
+      )
+      console.log(
+        `Imported ${summary.instruments} instruments, ${summary.transactions} transactions, ${summary.vestSchedule} scheduled vests, ${summary.prices} prices.`,
+      )
+      return
+    }
     case 'start': {
       // Loaded now, after the flags have been applied to the environment: the config module reads
       // it when first imported.
@@ -111,7 +175,12 @@ try {
   const cli = parseCli(process.argv.slice(2))
   if (cli.envFile) process.loadEnvFile(cli.envFile)
   applyCliEnv(process.env, cli)
-  await run(cli)
+  assumeYes = cli.yes
+  try {
+    await run(cli)
+  } finally {
+    closePrompts()
+  }
 } catch (err) {
   if (err instanceof UsageError) {
     console.error(`${err.message}\n\n${HELP}`)

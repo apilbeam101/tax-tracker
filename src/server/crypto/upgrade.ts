@@ -378,20 +378,65 @@ export interface PlaintextCopy {
   name: string
   location: 'backups' | 'data'
   bytes: number
+  /** False if the file could not be opened to check it: it may be encrypted, so it is never deletable. */
+  readable: boolean
+}
+
+/**
+ * The leftover copies to show after the upgrade, and which of them may be deleted. The upgrade's own
+ * safety copy is held back while the recovery key it guards is still unconfirmed (that flow deletes
+ * it); once the key is confirmed, or on a fresh install where nothing deletes it, a leftover one is
+ * an ordinary unencrypted copy like the rest.
+ */
+export function leftoverCopies(
+  db: Db,
+  dataDir: string,
+  backupDir: string,
+): { deletable: PlaintextCopy[]; unreadable: PlaintextCopy[] } {
+  const holdSafetyCopy = recoveryKeyNeedsConfirmation(db) && !keysCreatedAtSetup(db)
+  const all = listPlaintextCopies(dataDir, backupDir).filter(
+    (c) => !(holdSafetyCopy && c.name.endsWith(PRE_ENCRYPTION_SUFFIX)),
+  )
+  return {
+    deletable: all.filter((c) => c.readable),
+    unreadable: all.filter((c) => !c.readable),
+  }
+}
+
+/**
+ * Deletes the named copies. Only entries that leftoverCopies reports as deletable right now can be
+ * removed, so a request cannot name an arbitrary file, an unreadable (possibly encrypted) one, or
+ * the safety copy that is still guarded. Returns what was removed.
+ */
+export function removePlaintextCopies(
+  db: Db,
+  dataDir: string,
+  backupDir: string,
+  selection: Array<{ name: string; location: PlaintextCopy['location'] }>,
+): PlaintextCopy[] {
+  const removed: PlaintextCopy[] = []
+  for (const copy of leftoverCopies(db, dataDir, backupDir).deletable) {
+    if (!selection.some((s) => s.name === copy.name && s.location === copy.location)) continue
+    removeDatabaseFile(join(copy.location === 'backups' ? backupDir : dataDir, copy.name))
+    removed.push(copy)
+  }
+  return removed
 }
 
 // A database file counts as plaintext unless it can be opened and is seen to have key slots. A
-// file that cannot be read at all is reported rather than assumed safe.
-function holdsPlaintext(path: string): boolean {
+// file that cannot be read at all is reported rather than assumed safe, but it is marked
+// unreadable: it may be an encrypted file that is damaged or briefly locked, so it is never one to
+// offer for deletion.
+function inspectCopy(path: string): 'plaintext' | 'protected' | 'unreadable' {
   try {
     const copy = new DatabaseSync(path, { readOnly: true })
     try {
-      return !isEncryptedDatabase(copy)
+      return isEncryptedDatabase(copy) ? 'protected' : 'plaintext'
     } finally {
       copy.close()
     }
   } catch {
-    return true
+    return 'unreadable'
   }
 }
 
@@ -410,7 +455,7 @@ export function listPlaintextCopies(
     dir: string,
     location: PlaintextCopy['location'],
     keep: (name: string) => boolean,
-    isPlaintext: (path: string) => boolean,
+    inspect: (path: string) => 'plaintext' | 'protected' | 'unreadable',
   ) => {
     let names: string[]
     try {
@@ -422,7 +467,11 @@ export function listPlaintextCopies(
       try {
         const path = join(dir, name)
         const stat = lstatSync(path)
-        if (stat.isFile() && isPlaintext(path)) found.push({ name, location, bytes: stat.size })
+        if (!stat.isFile()) continue
+        const verdict = inspect(path)
+        if (verdict !== 'protected') {
+          found.push({ name, location, bytes: stat.size, readable: verdict === 'plaintext' })
+        }
       } catch {
         /* vanished or unreadable between listing and stat */
       }
@@ -432,14 +481,14 @@ export function listPlaintextCopies(
     backupDir,
     'backups',
     (n) => n.endsWith('.db') && n !== options.exceptSafetyCopy,
-    holdsPlaintext,
+    inspectCopy,
   )
-  scan(dataDir, 'data', (n) => /^taxtracker\.db\.bak/.test(n), holdsPlaintext)
+  scan(dataDir, 'data', (n) => /^taxtracker\.db\.bak/.test(n), inspectCopy)
   scan(
     dataDir,
     'data',
     (n) => /^ghostfolio-export.*\.json$/.test(n),
-    () => true,
+    () => 'plaintext',
   )
   return found
 }

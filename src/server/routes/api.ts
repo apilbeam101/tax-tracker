@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { requireAuth } from '../auth/middleware.ts'
 import { requireLiveSession, requireUnlocked } from '../lock.ts'
+import { backupRoutes } from './backup.ts'
 import { chartRoutes } from './charts.ts'
 import { holdingRoutes } from './holdings.ts'
 import { importExportRoutes } from './import-export.ts'
@@ -37,5 +38,6 @@ export const apiRoutes: FastifyPluginAsync = async (app) => {
   await app.register(chartRoutes, { prefix: '/charts' })
   await app.register(projectionRoutes, { prefix: '/projections' })
   await app.register(importExportRoutes)
+  await app.register(backupRoutes)
   await app.register(settingsRoutes, { prefix: '/settings' })
 }

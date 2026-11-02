@@ -14,8 +14,8 @@ export class HttpError extends Error {
 }
 
 export class BadRequestError extends HttpError {
-  constructor(message: string) {
-    super(400, message)
+  constructor(message: string, code?: string) {
+    super(400, message, code)
   }
 }
 

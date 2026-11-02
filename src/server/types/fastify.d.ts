@@ -4,7 +4,9 @@ import type { SessionTracker } from '../crypto/session-tracker.ts'
 import type { Db } from '../db/database.ts'
 import type {
   AppSecretStore,
+  FxRateStore,
   InstrumentStore,
+  PriceStore,
   TransactionStore,
   VestScheduleStore,
 } from '../repositories/index.ts'
@@ -17,6 +19,10 @@ import type { PriceService } from '../services/prices/cache.ts'
 // Deployment facts the routes need that are not part of any store.
 export interface RuntimeSettings {
   dataDir: string
+  /** The database file; defaults to taxtracker.db in dataDir where a test does not set it. */
+  dbPath?: string | undefined
+  /** 'exit': after staging a restore the server exits so its supervisor restarts it. */
+  restoreRestart?: 'manual' | 'exit' | undefined
   /** ENCRYPTION_KEY, if the deployment supplies one; it becomes the unattended key slot. */
   unattendedKey?: string | undefined
   /** Tests lower the passphrase KDF cost; production leaves it unset. */
@@ -37,6 +43,8 @@ declare module 'fastify' {
     cgtDisposals: CgtDisposalStore
     s104Pools: S104PoolStore
     vestSchedules: VestScheduleStore
+    prices: PriceStore
+    fxRates: FxRateStore
     appSecrets: AppSecretStore
     apiKeys: ApiKeys
     fx: FxService

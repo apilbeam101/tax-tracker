@@ -7,11 +7,32 @@ import {
   rotateRecoveryKey,
   setUnattendedKey,
   unlockWithPassphrase,
+  unlockWithRecoveryKey,
 } from '../crypto/keyslots.ts'
+import { InvalidRecoveryKeyError, parseRecoveryKey } from '../crypto/recovery.ts'
 import { checkUnattendedKeyLocation } from './doctor.ts'
 import { CliError, dataPaths, openExistingDb } from './util.ts'
 
+/** Asks for whatever unlocks the database: the passphrase, or the recovery key. */
 export type PassphraseSource = () => Promise<string>
+
+// A recovery key has a distinctive format with a checksum, which a passphrase will not satisfy, so
+// the same prompt serves both and someone who forgot their passphrase can still reach their data.
+export async function unlockDatabase(db: DatabaseSync, secret: string): Promise<Buffer | null> {
+  let recoveryKey = false
+  try {
+    parseRecoveryKey(secret).fill(0)
+    recoveryKey = true
+  } catch (err) {
+    if (!(err instanceof InvalidRecoveryKeyError)) throw err
+  }
+  if (recoveryKey) {
+    const dek = await unlockWithRecoveryKey(db, secret)
+    if (dek) return dek
+  }
+  // Also for text that looks like a recovery key but is not this database's: it may be a passphrase.
+  return unlockWithPassphrase(db, secret)
+}
 
 async function withUnlockedDb<T>(
   env: NodeJS.ProcessEnv,
@@ -25,8 +46,8 @@ async function withUnlockedDb<T>(
     if (!isEncryptedDatabase(db)) {
       throw new CliError('This database has no key slots. Encrypt it from the app first.')
     }
-    dek = await unlockWithPassphrase(db, await passphrase())
-    if (!dek) throw new CliError('That passphrase does not open this database.')
+    dek = await unlockDatabase(db, await passphrase())
+    if (!dek) throw new CliError('That passphrase or recovery key does not open this database.')
     return await fn(db, dek)
   } finally {
     dek?.fill(0)

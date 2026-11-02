@@ -110,7 +110,12 @@ export function recalcInstrument(
  * Per-instrument errors are logged and skipped so one unmatched disposal can't
  * stop the server coming up.
  */
-export function recalcAllInstruments(app: FastifyInstance): void {
+export type RecalcDeps = Pick<
+  FastifyInstance,
+  'db' | 'instruments' | 'transactions' | 'cgtDisposals' | 's104Pools'
+> & { log: { warn: (details: object, message: string) => void } }
+
+export function recalcAllInstruments(app: RecalcDeps): void {
   const tenantIds = (
     app.db.prepare('SELECT DISTINCT tenant_id FROM instrument').all() as unknown as {
       tenant_id: number

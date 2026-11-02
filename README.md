@@ -105,7 +105,7 @@ npm run build
 npm start -- --env-file .env
 ```
 
-`npm start` runs the `tax-tracker` command-line tool (`node dist/server/cli.js`). It reads the environment, and `--env-file` loads a `.env` file. Other options: `--port`, `--host`, `--data-dir`, `--open`. `tax-tracker --help` lists the commands: `init`, `info`, `doctor`, `backup`, `backfill-fx` and `keys`. The command-line tool defaults to self-configured mode (`AUTO_CONFIG=true`) unless `AUTO_CONFIG` is set.
+`npm start` runs the `tax-tracker` command-line tool (`node dist/server/cli.js`). It reads the environment, and `--env-file` loads a `.env` file. Other options: `--port`, `--host`, `--data-dir`, `--open`. `tax-tracker --help` lists the commands: `init`, `info`, `doctor`, `backup`, `restore`, `export`, `import`, `backfill-fx` and `keys`. The command-line tool defaults to self-configured mode (`AUTO_CONFIG=true`) unless `AUTO_CONFIG` is set.
 
 Or, for development with hot-reload:
 
@@ -183,17 +183,33 @@ npm start -- --env-file .env backfill-fx
 
 ---
 
-## Database backup
+## Backup, restore, export and import
+
+Two different things, kept separate:
+
+| | Backup / restore | Archive (export / import) |
+|---|---|---|
+| Format | SQLite snapshot (`.db`) | Versioned JSON (`.json`) |
+| Purpose | Disaster recovery on the same or a newer version | Moving between installs, inspecting your data |
+| Contents | Everything, including the key slots; encrypted columns stay encrypted | Instruments, transactions, scheduled vests, tax year settings, exchange rates and prices; encrypted with an export passphrase unless you choose otherwise |
+| Needs | Nothing to take one; restoring needs the passphrase or recovery key that belongs to the backup | The app unlocked (or the passphrase, from the command line) |
+
+The **Import / Export > Backups & archive** tab covers both. From the command line:
 
 ```bash
-tax-tracker backup        # or: npm start -- backup
+tax-tracker backup                     # snapshot into <data dir>/backups/ (works while the app runs, even locked)
+tax-tracker restore <file.db>          # app must be stopped; the current database is backed up first
+tax-tracker export [--out file.json]   # encrypted with an export passphrase; --plaintext to skip
+tax-tracker import <file.json>         # into an empty database; --replace to overwrite (backs up first)
 ```
 
-Creates a timestamped copy at `<data dir>/backups/taxtracker-YYYY-MM-DDTHH-MM-SS.db`. Schedule this via cron for regular backups:
+The commands that read your data (`export`, `import`, `keys`) ask for your passphrase, or your recovery key if you have forgotten it. Once your data is encrypted, the app flags older unencrypted copies (earlier backups, `.bak` files, Ghostfolio exports) with a badge in the navigation bar and lets you delete them from the **Backups & archive** tab.
 
-```cron
-0 2 * * * cd /path/to/claude-tax && npm start -- --env-file .env backup
-```
+Backups are named `taxtracker-<timestamp>-<reason>.db`. A backup is also taken automatically before an update changes the database (`pre-migration`) and before a restore or a replace-import; those are kept. `BACKUP_SCHEDULE=daily` (the default in self-configured mode, `off` otherwise) adds one a day; the last 14 manual and the last 14 scheduled backups are kept.
+
+**Restoring from the app** stages the uploaded file, and the swap happens the next time the app starts, before the database is opened. Set `RESTORE_RESTART=exit` where a supervisor restarts the app when it exits (Docker with `restart: unless-stopped`, Kubernetes, systemd with `Restart=always`) and the app exits by itself after staging; otherwise restart it yourself. Anything written between staging and the restart is discarded. If `ENCRYPTION_KEY` is set and cannot open the backup's unattended key slot, the restore is refused rather than leaving the app unable to start.
+
+**Restoring in a container.** `tax-tracker restore` refuses while the app container is running (it checks a lock file the app refreshes every few seconds in the data volume). Stop the app, then run it from a one-off container that mounts the same volume, for example `docker compose run --rm --entrypoint node app dist/server/cli.js restore /app/data/backups/<file>.db --yes`. On Kubernetes, scale the app to zero and run a Job or pod that mounts the same claim.
 
 ---
 
@@ -294,6 +310,6 @@ npx vitest run src/server/services/tax/matching.test.ts
 
 - **This app is single-user and self-hosted.** Do not expose port 3000 directly — always place it behind a reverse proxy with TLS.
 - Keep your `.env` file out of version control (it is in `.gitignore`).
-- Back up the database regularly (`tax-tracker backup`). The backup is a plain SQLite file — store it somewhere safe, preferably off-site.
+- Back up the database regularly (`tax-tracker backup`, or `BACKUP_SCHEDULE=daily`). A backup is a SQLite file that carries the key slots, so it opens only with the passphrase or recovery key that belongs to it — store it somewhere safe, preferably off-site. Backups taken before the storage-format upgrade, and plaintext archives, are readable by anyone who has them.
 - Encrypted fields use a random data key that is wrapped by your passphrase and by the recovery key. The plaintext data key is never stored on disk, and is held in memory only while a session is signed in (or permanently, if you opted in to an unattended `ENCRYPTION_KEY` slot).
 - `config.json` (self-configured mode) holds the session secret and non-secret settings only, never key material. API keys entered in the UI are stored encrypted.

@@ -43,20 +43,29 @@ export function errorMessage(err: unknown): string {
 
 // The passphrase is typed, never passed as an argument or read from the environment, so it cannot
 // end up in a process listing. Without a terminal (a pipe, or a shell that does not provide one)
-// the first line of standard input is used, and it is not hidden.
+// the next line of standard input is used, and it is not hidden.
+let pipedReader: ReturnType<typeof createInterface> | undefined
+let pipedLines: AsyncIterator<string> | undefined
+
+// Releases standard input so the process can exit when it is a pipe that never closes.
+export function closePrompts(): void {
+  pipedReader?.close()
+  pipedReader = undefined
+  pipedLines = undefined
+}
+
 export async function promptSecret(question: string): Promise<string> {
   const { stdin, stderr } = process
   if (!stdin.isTTY) {
     stderr.write(
       `${question}(no terminal: reading one line from standard input, input is not hidden)\n`,
     )
-    const rl = createInterface({ input: stdin })
-    try {
-      for await (const line of rl) return line
-    } finally {
-      rl.close()
-    }
-    throw new CliError('No input on standard input')
+    // One reader for the whole run: a second reader would lose lines the first had buffered.
+    pipedReader ??= createInterface({ input: stdin })
+    pipedLines ??= pipedReader[Symbol.asyncIterator]()
+    const next = await pipedLines.next()
+    if (next.done) throw new CliError('No input on standard input')
+    return next.value
   }
 
   stderr.write(question)

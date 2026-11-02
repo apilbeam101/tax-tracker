@@ -21,6 +21,8 @@ const SETTINGS = [
   'LOG_LEVEL',
   'SECURE_COOKIES',
   'TRUST_PROXY',
+  'BACKUP_SCHEDULE',
+  'RESTORE_RESTART',
 ] as const
 const ALLOWED = new Set<string>(['SESSION_SECRET', ...SETTINGS])
 

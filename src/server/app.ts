@@ -11,11 +11,10 @@ import { initDb } from './db/database.ts'
 import { errorHandler } from './errors.ts'
 import { registerLockState } from './lock.ts'
 import { registerRepositories } from './repositories/register.ts'
-import { createFxRateStore } from './repositories/sqlite/FxRateStore.ts'
-import { createPriceStore } from './repositories/sqlite/PriceStore.ts'
 import { apiRoutes } from './routes/api.ts'
 import { authRoutes } from './routes/auth.ts'
 import { healthRoute } from './routes/health.ts'
+import { startBackupSchedule } from './services/backup/scheduler.ts'
 import { createFxService } from './services/fx/index.ts'
 import { createPriceService } from './services/prices/cache.ts'
 import { createKeyedTiingoProvider } from './services/prices/tiingo.ts'
@@ -62,11 +61,21 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
   })
 
   // ── Database ────────────────────────────────────────────────────────────────
-  const db = await initDb(config.dbPath)
+  const db = await initDb(config.dbPath, { encryptionKey: config.encryptionKey })
   app.decorate('db', db)
+  // Closing cleanly folds the write-ahead log into the main file.
+  app.addHook('onClose', async () => {
+    try {
+      db.close()
+    } catch {
+      /* already closed */
+    }
+  })
 
   app.decorate('runtime', {
     dataDir: config.dataDir,
+    dbPath: config.dbPath,
+    restoreRestart: config.restoreRestart,
     unattendedKey: config.encryptionKey,
     configMode: config.configMode,
     apiKeysFromEnv: {
@@ -99,18 +108,25 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
   })
 
   // ── Repositories & services ──────────────────────────────────────────────────
-  const cipher = registerRepositories(app, db)
-  const fxRateStore = createFxRateStore(db)
-  app.decorate('fx', createFxService(fxRateStore, config.fxRatePolicy))
+  registerRepositories(app, db)
+  app.decorate('fx', createFxService(app.fxRates, config.fxRatePolicy))
 
-  const priceStore = createPriceStore(db, cipher)
   const priceProviders = [
     createKeyedTiingoProvider(() => app.apiKeys.get('TIINGO_API_KEY')),
     createYahooProvider(),
   ]
-  app.decorate('priceService', createPriceService(priceStore, priceProviders))
+  app.decorate('priceService', createPriceService(app.prices, priceProviders))
 
   await lockState.boot()
+
+  // Copies ciphertext, so it needs no unlock. The first check runs shortly after start.
+  const backups = startBackupSchedule({
+    db,
+    dataDir: config.dataDir,
+    schedule: config.backupSchedule,
+    warn: (message) => app.log.warn(message),
+  })
+  app.addHook('onClose', async () => backups.stop())
 
   // An upgrade whose clean-up did not finish (disk full, file held open by another program) is
   // retried here, before any request is served, until it completes.

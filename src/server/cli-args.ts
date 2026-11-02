@@ -8,6 +8,9 @@ export const COMMANDS = [
   'backup',
   'backfill-fx',
   'keys',
+  'restore',
+  'export',
+  'import',
 ] as const
 export type Command = (typeof COMMANDS)[number]
 
@@ -17,6 +20,11 @@ export type KeysSubcommand = (typeof KEYS_SUBCOMMANDS)[number]
 export interface ParsedCli {
   command: Command | 'help' | 'version'
   subcommand: string | undefined
+  file: string | undefined
+  out: string | undefined
+  plaintext: boolean
+  replace: boolean
+  yes: boolean
   port: string | undefined
   host: string | undefined
   dataDir: string | undefined
@@ -39,8 +47,15 @@ Commands:
   keys add-unattended   Add the unattended unlock slot, using ENCRYPTION_KEY or ENCRYPTION_KEY_FILE
   keys remove-unattended
   keys rotate-recovery  Replace the recovery key and print the new one once
+  restore <file>        Replace the database with a backup (the app must not be running)
+  export                Write a versioned JSON archive of your data, encrypted with an export passphrase
+  import <file>         Load an archive into an empty database (--replace to overwrite existing data)
 
 Options:
+  --out <file>          Where export writes the archive
+  --plaintext           Export without encryption (asks for confirmation)
+  --replace             Import over existing data, after a backup (asks for confirmation)
+  -y, --yes             Skip those confirmations (for scripts and shells without a terminal)
   --port <n>            Port to listen on (0 picks a free port)
   --host <address>      Address to listen on
   --data-dir <path>     Where the database and config file live
@@ -72,6 +87,10 @@ function parseFlags(argv: string[]) {
         'env-file': { type: 'string' },
         open: { type: 'boolean' },
         interactive: { type: 'boolean' },
+        out: { type: 'string' },
+        plaintext: { type: 'boolean' },
+        replace: { type: 'boolean' },
+        yes: { type: 'boolean', short: 'y' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -87,6 +106,11 @@ export function parseCli(argv: string[]): ParsedCli {
 
   const base = {
     subcommand: undefined as string | undefined,
+    file: undefined as string | undefined,
+    out: values.out,
+    plaintext: values.plaintext === true,
+    replace: values.replace === true,
+    yes: values.yes === true,
     port: values.port === undefined ? undefined : parsePort(values.port),
     host: values.host,
     dataDir: values['data-dir'],
@@ -108,6 +132,10 @@ export function parseCli(argv: string[]): ParsedCli {
       throw new UsageError(`Usage: tax-tracker keys <${KEYS_SUBCOMMANDS.join('|')}>`)
     }
     return { ...base, command, subcommand: second }
+  }
+  if (command === 'restore' || command === 'import') {
+    if (!second || extra.length > 0) throw new UsageError(`Usage: tax-tracker ${command} <file>`)
+    return { ...base, command, file: second }
   }
   if (second !== undefined) throw new UsageError(`Unexpected argument: ${second}`)
   return { ...base, command }

@@ -23,6 +23,34 @@
 
   let page: Page = $state('dashboard')
 
+  // Copies of the data that are not encrypted (old backups, Ghostfolio exports). Shown as a badge
+  // until they are deleted, because they undo the protection of the database itself.
+  let plaintextCount = $state(0)
+  let importTab: 'import' | 'export' | 'backups' = $state('import')
+
+  async function loadPlaintextCopies() {
+    try {
+      const res = await fetch('/api/backup')
+      if (res.ok) plaintextCount = ((await res.json()).plaintextCopies ?? []).length
+    } catch {
+      /* the badge is only a reminder */
+    }
+  }
+
+  // Changing the key remounts the page, so the badge can switch tabs even while it is open.
+  let importNonce = $state(0)
+
+  function showPlaintextCopies() {
+    importTab = 'backups'
+    importNonce++
+    page = 'import-export'
+  }
+
+  function showImportExport() {
+    importTab = 'import'
+    page = 'import-export'
+  }
+
   interface ChartPoint { date: string; value: string }
   interface TaxYear { taxYear: string }
   interface HoldingSummary { ticker: string; costGbp: string; valueGbp: string | null; priceDate: string | null }
@@ -129,6 +157,7 @@
   }
 
   onMount(async () => {
+    void loadPlaintextCopies()
     await loadTaxYears()
     await Promise.all([loadPortfolioChart(), loadGainsChart(), loadDividendsChart(), loadOverview()])
   })
@@ -168,7 +197,12 @@
       <a href="#holdings" class:active={page === 'holdings'} onclick={() => page = 'holdings'}>Holdings</a>
       <a href="#tax" class:active={page === 'tax'} onclick={() => page = 'tax'}>Tax Summary</a>
       <a href="#projections" class:active={page === 'projections'} onclick={() => page = 'projections'}>Projections</a>
-      <a href="#import-export" class:active={page === 'import-export'} onclick={() => page = 'import-export'}>Import / Export</a>
+      <a href="#import-export" class:active={page === 'import-export'} onclick={showImportExport}>Import / Export</a>
+      {#if plaintextCount > 0}
+        <a href="#import-export" class="copies-badge" onclick={showPlaintextCopies} title="Unencrypted copies of your data are still on disk. Click to review and delete them.">
+          {plaintextCount} unencrypted {plaintextCount === 1 ? 'copy' : 'copies'}
+        </a>
+      {/if}
       <a href="#settings" class:active={page === 'settings'} onclick={() => page = 'settings'}>Settings</a>
     </nav>
     <div class="user-menu">
@@ -193,7 +227,9 @@
     {:else if page === 'projections'}
       <Projections />
     {:else if page === 'import-export'}
-      <ImportExport />
+      {#key `${importTab}-${importNonce}`}
+        <ImportExport startTab={importTab} oncopies={(n) => (plaintextCount = n)} />
+      {/key}
     {:else if page === 'settings'}
       <ApiKeys />
     {:else}
@@ -338,6 +374,7 @@
   nav { display: flex; gap: 1rem; flex: 1; }
   nav a { color: rgba(255,255,255,.8); text-decoration: none; font-size: .9rem; }
   nav a:hover, nav a.active { color: var(--nav-text); font-weight: 600; }
+  nav a.copies-badge { background: var(--warning); color: #1a1a2e; border-radius: 999px; padding: 0.1rem 0.6rem; font-size: .75rem; font-weight: 600; white-space: nowrap; }
   .user-menu { display: flex; align-items: center; gap: .75rem; font-size: .875rem; }
   .user-menu button {
     background: transparent; border: 1px solid rgba(255,255,255,.4);

@@ -4,7 +4,9 @@ import type { Db } from '../db/database.ts'
 import { createApiKeys } from '../services/api-keys.ts'
 import { createAppSecretStore } from './sqlite/AppSecretStore.ts'
 import { createCgtDisposalStore } from './sqlite/CgtDisposalStore.ts'
+import { createFxRateStore } from './sqlite/FxRateStore.ts'
 import { createInstrumentStore } from './sqlite/InstrumentStore.ts'
+import { createPriceStore } from './sqlite/PriceStore.ts'
 import { createS104PoolStore } from './sqlite/S104PoolStore.ts'
 import { createTransactionStore } from './sqlite/TransactionStore.ts'
 import { createVestScheduleStore } from './sqlite/VestScheduleStore.ts'
@@ -19,6 +21,8 @@ export function registerRepositories(app: FastifyInstance, db: Db): FieldCipher 
   app.decorate('cgtDisposals', createCgtDisposalStore(db, cipher))
   app.decorate('s104Pools', createS104PoolStore(db, cipher))
   app.decorate('vestSchedules', createVestScheduleStore(db, cipher))
+  app.decorate('prices', createPriceStore(db, cipher))
+  app.decorate('fxRates', createFxRateStore(db))
   app.decorate('appSecrets', createAppSecretStore(db, cipher))
   app.decorate(
     'apiKeys',

@@ -154,6 +154,19 @@ export class Client {
     return res
   }
 
+  /** POSTs a raw file body, as the restore upload does. */
+  async upload(url: string, body: Buffer, withCsrf = true) {
+    const headers: Record<string, string> = { 'content-type': 'application/octet-stream' }
+    if (this.#cookie) headers.cookie = this.#cookie
+    if (withCsrf) {
+      await this.#fetchCsrf()
+      headers['csrf-token'] = this.#csrf
+    }
+    const res = await this.app.inject({ method: 'POST', url, headers, payload: body })
+    this.#absorbCookies(res.headers['set-cookie'])
+    return res
+  }
+
   /** Like request(), but never sends the CSRF token. */
   async requestWithoutCsrf(method: 'POST' | 'PUT' | 'DELETE', url: string, payload?: unknown) {
     return this.app.inject({

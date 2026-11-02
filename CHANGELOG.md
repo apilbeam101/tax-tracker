@@ -46,6 +46,19 @@ All notable changes to this project are documented in this file. Format follows 
 - `PORT=0` is accepted and lets the OS pick a free port (`src/server/config/env.ts`).
 - `scripts/check-pack-allowlist.ts` (`npm run pack:check`) fails the build if the packed tarball is missing a runtime file or contains environment files, databases, config files, tests or sources. `scripts/smoke-pack.ts` (`npm run pack:smoke`) installs the packed tarball into an empty directory, starts it on a free port and probes `/health`. Both run in CI (`.github/workflows/ci.yml`), and the smoke test runs on Ubuntu, macOS and Windows.
 - README and `.env.example` document `AUTO_CONFIG`, the Settings page and first-run setup.
+- Backup service (`src/server/services/backup/`): snapshots are taken with `VACUUM INTO` (one consistent snapshot even while another process keeps writing), verified before they are listed, and named `taxtracker-<timestamp>-<reason>.db`. Reasons are `manual`, `scheduled`, `pre-migration`, `pre-restore` and `pre-import`. Only `manual` and `scheduled` backups are pruned, to 14 of each.
+- Automatic `pre-migration` backup, taken before pending migrations run on an existing database. Migration list helpers live in `src/server/db/migration-files.ts`.
+- Restore: a backup is validated (SQLite header, integrity check, migrations known to this version, tenant, and key slots plus an account when it has key slots), staged as `restore-pending.db` and swapped in before the database is opened. The current database is backed up first. An unprotected backup can replace an unprotected database but not a protected one, and a restore is refused when the server's `ENCRYPTION_KEY` cannot open the backup.
+- `tax-tracker restore` runs offline. It checks and holds `server.lock`, a heartbeat file that works across containers, and a starting server waits for a fresh foreign lock and then refuses to start.
+- `BACKUP_SCHEDULE` (`daily` or `off`): `daily` is the default only in self-configured mode. It can also be set in `config.json`.
+- `RESTORE_RESTART` (`manual` or `exit`): `exit` makes the server exit after staging a restore so a supervisor can restart it. The default is `manual`.
+- Versioned JSON archive export and import (`src/server/services/backup/archive.ts`): `tax-tracker export` and `tax-tracker import`, `POST /api/export/archive` and `POST /api/import/archive`, and a "Backups & archive" tab on the Import / Export page (`src/client/src/routes/Backups.svelte`). Archives are encrypted with an export passphrase by default, and a plaintext export requires explicit confirmation.
+- Import validates every field, runs in a single transaction, remaps ids, recalculates CGT and never changes existing tax year settings. It can load into an empty database or replace the current data, and replace takes a backup first.
+- A navigation badge and a list on the Backups tab flag leftover unencrypted copies of the data (earlier backups, `.bak` files, Ghostfolio exports) once the database itself is encrypted, and `POST /api/backup/plaintext-copies/delete` removes selected ones. Files that cannot be opened are listed but never offered for deletion, and the upgrade's own safety copy is held back until its recovery key is confirmed.
+- `export`, `import` and `keys` accept the recovery key as well as the passphrase at the prompt.
+- `--yes` skips the confirmation prompts of `restore`, `export --plaintext` and `import --replace`, for scripts and shells without a terminal.
+- API routes `GET /api/backup`, `POST /api/backup`, `GET /api/backup/:name` and `POST`/`DELETE /api/backup/restore` (`src/server/routes/backup.ts`).
+- README and `.env.example` document backup, restore, export and import, including container recipes.
 
 ### Changed
 
@@ -82,6 +95,11 @@ All notable changes to this project are documented in this file. Format follows 
 - The loaded-config singleton moved from `src/server/config/env.ts` to `src/server/config/current.ts`, so importing `env.ts` no longer loads configuration or creates `config.json`.
 - Config file JSON parse errors report that the file is not valid JSON without quoting its content (`src/server/config/file.ts`).
 - `tsconfig.server.json` excludes tests, the client and `test-harness.ts` from the server build.
+- `tax-tracker backup` uses the shared backup service and names files by reason, replacing the earlier script output naming.
+- `BadRequestError` (`src/server/errors.ts`) accepts an optional `code`, as `HttpError` does.
+- `recalcAllInstruments` (`src/server/services/tax/recalc.ts`) takes a narrower dependency type.
+- `createTestDb` (`src/server/db/testdb.ts`) records applied migrations in `_migrations`.
+- The price and FX stores are available on the app instance (`src/server/app.ts`).
 
 ### Fixed
 

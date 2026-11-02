@@ -31,6 +31,24 @@ describe('parseCli', () => {
     expect(() => parseCli(['keys', 'add-unattended', 'extra'])).toThrow(UsageError)
   })
 
+  it('takes a file for restore and import, and flags for export and import', () => {
+    expect(parseCli(['restore', 'b.db'])).toMatchObject({ command: 'restore', file: 'b.db' })
+    expect(parseCli(['import', 'a.json', '--replace'])).toMatchObject({
+      command: 'import',
+      file: 'a.json',
+      replace: true,
+    })
+    expect(parseCli(['export', '--out', 'x.json', '--plaintext'])).toMatchObject({
+      command: 'export',
+      out: 'x.json',
+      plaintext: true,
+    })
+    expect(parseCli(['restore', 'b.db', '-y']).yes).toBe(true)
+    expect(parseCli(['restore', 'b.db']).yes).toBe(false)
+    expect(() => parseCli(['restore'])).toThrow(UsageError)
+    expect(() => parseCli(['import', 'a', 'b'])).toThrow(UsageError)
+  })
+
   it.each(['-1', '65536', 'abc', '3.5', ''])('rejects --port %j', (port) => {
     expect(() => parseCli(['--port', port])).toThrow(UsageError)
   })

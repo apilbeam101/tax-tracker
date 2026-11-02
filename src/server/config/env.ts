@@ -5,6 +5,7 @@
 
 import { isIP } from 'node:net'
 import { homedir } from 'node:os'
+import type { BackupSchedule } from '../services/backup/scheduler.ts'
 import { ensureConfigFile } from './file.ts'
 import { resolveDataPaths } from './paths.ts'
 import { readSecret, validateStrongSecret } from './secrets.ts'
@@ -14,6 +15,9 @@ type FxRatePolicy = (typeof FX_RATE_POLICIES)[number]
 
 const SECURE_COOKIE_MODES = ['auto', 'true', 'false'] as const
 type SecureCookies = 'auto' | boolean
+
+const BACKUP_SCHEDULES = ['daily', 'off'] as const
+const RESTORE_RESTARTS = ['manual', 'exit'] as const
 
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const
 
@@ -105,6 +109,21 @@ export function buildConfig(env: NodeJS.ProcessEnv = process.env) {
   const secureCookies = parseSecureCookies(env.SECURE_COOKIES || 'auto', errors)
   const trustProxy = parseTrustProxy(env.TRUST_PROXY, errors)
 
+  const backupScheduleRaw = env.BACKUP_SCHEDULE || (env.AUTO_CONFIG === 'true' ? 'daily' : 'off')
+  if (!(BACKUP_SCHEDULES as readonly string[]).includes(backupScheduleRaw)) {
+    errors.push(
+      `BACKUP_SCHEDULE must be one of ${BACKUP_SCHEDULES.join(', ')}, got: ${backupScheduleRaw}`,
+    )
+  }
+  const backupSchedule: BackupSchedule = backupScheduleRaw === 'daily' ? 'daily' : 'off'
+
+  const restoreRestart = env.RESTORE_RESTART || 'manual'
+  if (!(RESTORE_RESTARTS as readonly string[]).includes(restoreRestart)) {
+    errors.push(
+      `RESTORE_RESTART must be one of ${RESTORE_RESTARTS.join(', ')}, got: ${restoreRestart}`,
+    )
+  }
+
   const logLevelRaw = env.LOG_LEVEL || 'info'
   if (!(LOG_LEVELS as readonly string[]).includes(logLevelRaw)) {
     errors.push(`LOG_LEVEL must be one of ${LOG_LEVELS.join(', ')}, got: ${logLevelRaw}`)
@@ -127,6 +146,8 @@ export function buildConfig(env: NodeJS.ProcessEnv = process.env) {
     fxRatePolicy,
     secureCookies,
     trustProxy,
+    backupSchedule,
+    restoreRestart: (restoreRestart === 'exit' ? 'exit' : 'manual') as 'exit' | 'manual',
     logLevel: logLevelRaw,
     gitCommit: env.GIT_COMMIT || 'unknown',
   }

@@ -22,6 +22,9 @@ const ENV_KEYS = [
   'TRUST_PROXY',
   'LOG_LEVEL',
   'GIT_COMMIT',
+  'AUTO_CONFIG',
+  'BACKUP_SCHEDULE',
+  'RESTORE_RESTART',
 ] as const
 
 const SESSION = 'a'.repeat(64)
@@ -74,6 +77,8 @@ describe('buildConfig', () => {
       fxRatePolicy: 'hmrc-monthly',
       secureCookies: 'auto',
       trustProxy: false,
+      backupSchedule: 'off',
+      restoreRestart: 'manual',
       logLevel: 'info',
       gitCommit: 'unknown',
     })
@@ -110,6 +115,23 @@ describe('buildConfig', () => {
   it.each(['65536', '-1', 'abc', '3.5'])('rejects an invalid PORT value: %s', (raw) => {
     process.env.PORT = raw
     expect(() => buildConfig()).toThrowError(/PORT must be an integer between 0 and 65535/)
+  })
+
+  it('defaults BACKUP_SCHEDULE to daily in self-configured mode and off otherwise', () => {
+    expect(buildConfig().backupSchedule).toBe('off')
+    process.env.AUTO_CONFIG = 'true'
+    expect(buildConfig().backupSchedule).toBe('daily')
+    process.env.BACKUP_SCHEDULE = 'off'
+    expect(buildConfig().backupSchedule).toBe('off')
+    process.env.BACKUP_SCHEDULE = 'weekly'
+    expect(() => buildConfig()).toThrowError(/BACKUP_SCHEDULE must be one of/)
+  })
+
+  it('validates RESTORE_RESTART', () => {
+    process.env.RESTORE_RESTART = 'exit'
+    expect(buildConfig().restoreRestart).toBe('exit')
+    process.env.RESTORE_RESTART = 'reboot'
+    expect(() => buildConfig()).toThrowError(/RESTORE_RESTART must be one of/)
   })
 
   it('accepts PORT 0, which asks the OS for a free port', () => {
