@@ -46,7 +46,7 @@ export function prettyAvailable(
   }
 }
 
-// pino-pretty is a dev dependency; fall back to JSON when it is absent or when
+// pino-pretty is an optional dependency; fall back to JSON when it is absent or when
 // output is piped, so a production install never crashes on a missing module.
 export function loggerOptions(level: string, pretty: boolean = prettyAvailable()): LoggerOptions {
   return pretty ? { level, redact, transport: { target: 'pino-pretty' } } : { level, redact }

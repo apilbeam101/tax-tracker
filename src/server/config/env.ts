@@ -23,8 +23,8 @@ function isFxRatePolicy(v: string): v is FxRatePolicy {
 
 function validatePort(raw: string, errors: string[]): number {
   const n = Number(raw)
-  if (!Number.isInteger(n) || n < 1 || n > 65535) {
-    errors.push(`PORT must be an integer between 1 and 65535, got: ${raw}`)
+  if (!Number.isInteger(n) || n < 0 || n > 65535) {
+    errors.push(`PORT must be an integer between 0 and 65535 (0 picks a free port), got: ${raw}`)
     return 3000
   }
   return n
@@ -180,7 +180,3 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): LoadedConfig {
     configFile: file.path,
   }
 }
-
-export const config = loadConfig()
-
-export type Config = typeof config

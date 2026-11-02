@@ -35,8 +35,9 @@ function parse(path: string, raw: string): ConfigFileValues {
   try {
     // Windows editors (Notepad, PowerShell 5) like to prepend a byte-order mark.
     json = JSON.parse(raw.replace(/^﻿/, ''))
-  } catch (err) {
-    throw new Error(`${path} is not valid JSON: ${(err as Error).message}`)
+  } catch {
+    // The parser's own message can quote part of the file, which may hold the session secret.
+    throw new Error(`${path} is not valid JSON`)
   }
   if (typeof json !== 'object' || json === null || Array.isArray(json)) {
     throw new Error(`${path} must hold a JSON object`)
@@ -93,6 +94,31 @@ export function createExclusive(dataDir: string, values: ConfigFileValues): Conf
   } finally {
     rmSync(tmp, { force: true })
   }
+}
+
+export type ConfigSetting = (typeof SETTINGS)[number]
+
+// Writes non-secret settings into the config file (init --interactive). The names are
+// checked against the allowlist here too, so no caller can route key material into the file.
+export function updateConfigSettings(
+  dataDir: string,
+  updates: Partial<Record<ConfigSetting, string>>,
+): ConfigFileValues {
+  const values = { ...readConfigFile(dataDir) }
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 })
+  for (const [name, value] of Object.entries(updates)) {
+    if (!(SETTINGS as readonly string[]).includes(name) || typeof value !== 'string') {
+      throw new Error(`"${name}" is not a setting that belongs in the config file`)
+    }
+    values[name] = value
+  }
+  const tmp = writeTemp(dataDir, values)
+  try {
+    renameSync(tmp, configFilePath(dataDir))
+  } finally {
+    rmSync(tmp, { force: true })
+  }
+  return values
 }
 
 export interface EnsureOptions {

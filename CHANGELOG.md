@@ -41,6 +41,10 @@ All notable changes to this project are documented in this file. Format follows 
 - `AUTO_CONFIG` (default `false`): when `true` ("self-configured" mode), a generated `SESSION_SECRET` and the non-secret settings `HOST`, `PORT`, `FX_RATE_POLICY`, `LOG_LEVEL`, `SECURE_COOKIES` and `TRUST_PROXY` are kept in `config.json` in the data directory, written atomically (mode `0600` on Linux and macOS). The file never holds key material or API keys, and environment variables always override it. The default mode reads only the environment and writes nothing.
 - Settings page for API keys: Tiingo and Alpha Vantage keys can be entered in a new Settings page and are stored encrypted. A saved key applies without a restart. Keys supplied through the environment (including `_FILE` variants) always take precedence, and in the default environment-supplied mode the API key fields are read-only.
 - `runInit()` (`src/server/init.ts`) prepares the config file and reports where data lives; the `init` command will use it once the CLI is added.
+- `tax-tracker` command-line tool (`src/server/cli.ts`, `src/server/cli-args.ts`, `src/server/commands/`), shipped as the `uk-tax-tracker` package with bin `tax-tracker`. Commands: `start` (the default), `init` (`--interactive` prompts for `FX_RATE_POLICY` in self-configured mode), `info`, `doctor` (never prints or asks for key material), `backup` (writes a snapshot to `<data dir>/backups` via SQLite's backup API), `backfill-fx`, and `keys add-unattended`, `keys remove-unattended`, `keys rotate-recovery`.
+- `tax-tracker` flags: `--port` (0 picks a free port), `--host`, `--data-dir`, `--env-file`, `--open` (opens the browser once the server is listening), `--interactive`.
+- `PORT=0` is accepted and lets the OS pick a free port (`src/server/config/env.ts`).
+- `scripts/check-pack-allowlist.ts` (`npm run pack:check`) fails the build if the packed tarball is missing a runtime file or contains environment files, databases, config files, tests or sources. `scripts/smoke-pack.ts` (`npm run pack:smoke`) installs the packed tarball into an empty directory, starts it on a free port and probes `/health`. Both run in CI (`.github/workflows/ci.yml`), and the smoke test runs on Ubuntu, macOS and Windows.
 - README and `.env.example` document `AUTO_CONFIG`, the Settings page and first-run setup.
 
 ### Changed
@@ -70,10 +74,23 @@ All notable changes to this project are documented in this file. Format follows 
 - Linting moved from ESLint (which had no working config — `npm run lint` failed outright) to Biome. `typescript-eslint`'s peer dependency doesn't yet support this project's TypeScript `^7`, and Biome has no such constraint.
 - `npm run typecheck` now covers `scripts/` in addition to `src/server`/`src/shared` (previously ungated — two pre-existing type errors there are fixed).
 - The Tax Summary dividend and confirmed-ESPP-purchase transaction tables now show the transaction date instead of a bare, unlinked transaction ID.
+- Package renamed from `claude-tax` to `uk-tax-tracker`, with a `bin` entry for `tax-tracker` and a `files` allowlist (`dist`, `LICENSE`, `README.md`) (`package.json`).
+- `npm start` runs the CLI (`dist/server/cli.js`) and no longer loads `.env` implicitly. Pass `--env-file .env` or set the environment instead. `npm run start:dev` runs the CLI from source.
+- The CLI defaults to self-configured mode (`AUTO_CONFIG=true`) unless `AUTO_CONFIG` is already set, including an explicit `false`. `.env.example` now sets `AUTO_CONFIG=false` so a `.env`-driven setup keeps its settings in the environment.
+- `npm run build` removes `dist` before building.
+- `pino-pretty` moved from devDependencies to optionalDependencies.
+- The loaded-config singleton moved from `src/server/config/env.ts` to `src/server/config/current.ts`, so importing `env.ts` no longer loads configuration or creates `config.json`.
+- Config file JSON parse errors report that the file is not valid JSON without quoting its content (`src/server/config/file.ts`).
+- `tsconfig.server.json` excludes tests, the client and `test-harness.ts` from the server build.
 
 ### Fixed
 
 - Projection-to-transaction linking (`src/server/services/tax/recalc.ts`) required the scheduled date and the transaction date to match exactly, so any real-world settlement drift (weekends, broker lag) silently left the projection duplicated forever. Widened to a ±7-day tolerance, preferring the closest date and then the closest quantity.
 - The Projections page's delete action (`src/client/src/routes/Projections.svelte`) silently ignored a failed `DELETE` request (e.g. an expired CSRF token) and reloaded the list as if it had succeeded, making a failed delete indistinguishable from a real bug. It now surfaces a visible error instead.
+
+### Removed
+
+- The `npm run backup` script and `scripts/backup.ts`; use `tax-tracker backup`.
+- `scripts/backfill-fx.ts`; use `tax-tracker backfill-fx`.
 
 [Unreleased]: https://github.com/apilbeam101/tax-tracker/commits/master

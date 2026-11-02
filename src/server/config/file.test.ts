@@ -11,7 +11,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { loadConfig } from './env.ts'
-import { CONFIG_FILENAME, createExclusive, ensureConfigFile, readConfigFile } from './file.ts'
+import {
+  CONFIG_FILENAME,
+  createExclusive,
+  ensureConfigFile,
+  readConfigFile,
+  updateConfigSettings,
+} from './file.ts'
 
 let dir: string
 
@@ -193,5 +199,33 @@ describe('loadConfig', () => {
 
   it('rejects an AUTO_CONFIG value that is not true or false', () => {
     expect(() => loadConfig(base({ AUTO_CONFIG: 'yes' }))).toThrow(/AUTO_CONFIG/)
+  })
+})
+
+describe('updateConfigSettings', () => {
+  it('adds a setting and keeps the session secret', () => {
+    write({ SESSION_SECRET: 's'.repeat(64) })
+    updateConfigSettings(dir, { FX_RATE_POLICY: 'daily-spot' })
+    expect(readConfigFile(dir)).toEqual({
+      SESSION_SECRET: 's'.repeat(64),
+      FX_RATE_POLICY: 'daily-spot',
+    })
+  })
+
+  it('creates the file when there is none', () => {
+    updateConfigSettings(dir, { PORT: '8080' })
+    expect(readConfigFile(dir)).toEqual({ PORT: '8080' })
+  })
+
+  it('refuses names outside the allowlist, so key material cannot be routed into the file', () => {
+    expect(() => updateConfigSettings(dir, { ENCRYPTION_KEY: 'k'.repeat(64) } as never)).toThrow(
+      /not a setting that belongs/,
+    )
+    expect(existsSync(join(dir, CONFIG_FILENAME))).toBe(false)
+  })
+
+  it('does not quote file content when the JSON is invalid', () => {
+    write('{ "SESSION_SECRET": abcdef0123')
+    expect(() => readConfigFile(dir)).toThrow(/is not valid JSON$/)
   })
 })

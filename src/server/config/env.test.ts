@@ -107,9 +107,14 @@ describe('buildConfig', () => {
     expect(message).toContain('SECURE_COOKIES')
   })
 
-  it.each(['0', '65536', '-1', 'abc', '3.5'])('rejects an invalid PORT value: %s', (raw) => {
+  it.each(['65536', '-1', 'abc', '3.5'])('rejects an invalid PORT value: %s', (raw) => {
     process.env.PORT = raw
-    expect(() => buildConfig()).toThrowError(/PORT must be an integer between 1 and 65535/)
+    expect(() => buildConfig()).toThrowError(/PORT must be an integer between 0 and 65535/)
+  })
+
+  it('accepts PORT 0, which asks the OS for a free port', () => {
+    process.env.PORT = '0'
+    expect(buildConfig().port).toBe(0)
   })
 
   it.each(['hmrc-monthly', 'daily-spot'])('accepts FX_RATE_POLICY: %s', (policy) => {

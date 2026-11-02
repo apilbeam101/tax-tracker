@@ -20,7 +20,7 @@
  *   4. Skips records where a DIV_PAY already exists within ±3 days of the payment date.
  *   5. Dry-run: prints a table of proposed rows. With --commit: inserts them.
  *
- * After committing, run backfill-fx.ts to populate GBP fields, then POST /api/tax/run.
+ * After committing, run `tax-tracker backfill-fx` to populate GBP fields, then POST /api/tax/run.
  *
  * Requires ALPHA_VANTAGE_API_KEY in .env.
  */
@@ -339,5 +339,5 @@ try {
 console.log(`\nInserted ${inserted} DIV_PAY rows.`)
 console.log('\nNext steps:')
 console.log('  1. Review estimated payment dates (marked ⚠) in the Transactions UI')
-console.log('  2. Run backfill-fx.ts to populate GBP fields')
+console.log('  2. Run `tax-tracker backfill-fx` to populate GBP fields')
 console.log('  3. POST /api/tax/run to recompute disposals and dividend tax')
