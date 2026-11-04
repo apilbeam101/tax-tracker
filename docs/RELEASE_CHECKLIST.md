@@ -16,7 +16,13 @@ publishes the image, publishes to npm, and creates the GitHub Release with the i
      to the candidates);
    - if this is a new minor or major version, update the default image tag in
      `deploy/compose/docker-compose.yml`, `deploy/kubernetes/statefulset.yaml` and
-     `deploy/kubernetes/cronjob-backup.example.yaml`.
+     `deploy/kubernetes/cronjob-backup.example.yaml`;
+   - for a stable release, write the release notes in `docs/releases/vX.Y.Z.md`: a short
+     description of the project and what it does, by area, for someone who has never seen it (the
+     CHANGELOG stays the development log). They become the body of the GitHub Release, the release
+     fails before publishing anything if the file is missing or does not mention the version, and
+     the installer commands and documentation links in it should use the `vX.Y.Z` URLs. A
+     pre-release needs no notes file; its CHANGELOG section is used.
    - Check `npm run changelog:check` passes.
 3. Refresh the Node.js package the macOS installer falls back to, if a newer LTS release exists:
    `NODE_PKG_VERSION` and `NODE_PKG_SHA256` in [`install/install.sh`](../install/install.sh), with

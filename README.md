@@ -2,6 +2,8 @@
 
 A self-hosted single-user web app for tracking UK Capital Gains Tax, dividend income, and employment income from RSU/ESPP equity grants. Built on Fastify + Svelte 5 + SQLite — no external database server required. Supports light and dark themes.
 
+> **Not tax advice.** UK Tax Tracker helps you work out your figures from your own records. Check the results against HMRC's guidance, and ask a qualified adviser if you are unsure. It is provided as is, under the [MIT licence](LICENSE).
+
 ---
 
 ## Quick start

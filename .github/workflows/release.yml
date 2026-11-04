@@ -58,6 +58,13 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: node --experimental-strip-types scripts/extract-changelog-section.ts "$VERSION" > /dev/null
 
+      # A stable release must have written release notes (docs/releases/vX.Y.Z.md); a pre-release
+      # can use its changelog section. Checked here so a release fails before anything is published.
+      - name: assert the release notes exist
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: node --experimental-strip-types scripts/release-notes.ts "$VERSION" > /dev/null
+
   publish:
     name: Build, push, and attest image
     needs: verify
@@ -71,6 +78,7 @@ jobs:
       ref: ${{ github.sha }}
       version: ${{ needs.verify.outputs.version }}
       tag-latest: ${{ needs.verify.outputs.is-prerelease != 'true' }}
+      tag-moving: ${{ needs.verify.outputs.is-prerelease != 'true' }}
     secrets: inherit
 
   # npm trusted publishing: the registry accepts the workflow's OIDC identity, so no long-lived
@@ -132,10 +140,10 @@ jobs:
         with:
           node-version: 24
 
-      - name: extract release notes from CHANGELOG.md
+      - name: choose the release notes
         env:
           VERSION: ${{ needs.verify.outputs.version }}
-        run: node --experimental-strip-types scripts/extract-changelog-section.ts "$VERSION" > release-notes.md
+        run: node --experimental-strip-types scripts/release-notes.ts "$VERSION" > release-notes.md
 
       # The installers are attached with this release's version written in, so a pinned download
       # URL always installs the version it belongs to. They install from npm, so they are only

@@ -21,6 +21,11 @@ on:
         required: false
         type: boolean
         default: true
+      tag-moving:
+        description: Also push the minor and major tags (X.Y and X), which follow patch releases and the monthly base-image rebuild. Never for a pre-release.
+        required: false
+        type: boolean
+        default: false
       smoke:
         description: Build and run an amd64 image before pushing, and fail without pushing if it does not report the expected version and commit. The monthly rebuild sets this, since the floating node base can move a Node minor between rebuilds.
         required: false
@@ -50,6 +55,7 @@ jobs:
       image: ${{ steps.image.outputs.name }}
       digest: ${{ steps.build.outputs.digest }}
       platforms: ${{ steps.platforms.outputs.platforms }}
+      tag-names: ${{ steps.tags.outputs.names }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -71,15 +77,20 @@ jobs:
           VERSION: ${{ inputs.version }}
           TAG_LATEST: ${{ inputs.tag-latest }}
           TAG_VERSION: ${{ inputs.tag-version }}
+          TAG_MOVING: ${{ inputs.tag-moving }}
         run: |
+          set -eu
+          flags=()
+          if [ "$TAG_VERSION" = "true" ]; then flags+=(--exact); fi
+          if [ "$TAG_LATEST" = "true" ]; then flags+=(--latest); fi
+          if [ "$TAG_MOVING" = "true" ]; then flags+=(--moving); fi
+          # The tag rules (and the refusal to move any tag for a pre-release) live in one tested
+          # script. The names are also passed on, so the Docker Hub copy gets exactly the same tags.
+          names=$(node --experimental-strip-types scripts/image-tags.ts "$VERSION" "${flags[@]}")
           {
+            echo "names=$(echo $names)"
             echo "tags<<EOF"
-            if [ "$TAG_VERSION" = "true" ]; then
-              echo "$IMAGE:$VERSION"
-            fi
-            if [ "$TAG_LATEST" = "true" ]; then
-              echo "$IMAGE:latest"
-            fi
+            for name in $names; do echo "$IMAGE:$name"; done
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -240,9 +251,7 @@ jobs:
       - name: mirror multi-arch manifest to Docker Hub
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          VERSION: ${{ inputs.version }}
-          TAG_LATEST: ${{ inputs.tag-latest }}
-          TAG_VERSION: ${{ inputs.tag-version }}
+          TAG_NAMES: ${{ needs.build.outputs.tag-names }}
           SOURCE_IMAGE: ${{ needs.build.outputs.image }}
           SOURCE_DIGEST: ${{ needs.build.outputs.digest }}
         run: |
@@ -250,10 +259,5 @@ jobs:
           repo="${GITHUB_REPOSITORY#*/}"
           target="docker.io/${DOCKERHUB_USERNAME}/${repo,,}"
           args=()
-          if [ "$TAG_VERSION" = "true" ]; then
-            args+=(--tag "$target:$VERSION")
-          fi
-          if [ "$TAG_LATEST" = "true" ]; then
-            args+=(--tag "$target:latest")
-          fi
+          for name in $TAG_NAMES; do args+=(--tag "$target:$name"); done
           docker buildx imagetools create "${args[@]}" "$SOURCE_IMAGE@$SOURCE_DIGEST"
