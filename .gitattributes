@@ -1,0 +1,3 @@
+# A CRLF line ending after the shebang or inside a here-document breaks the installer on macOS and Linux.
+install/install.sh text eol=lf
+deploy/systemd/*.service text eol=lf

@@ -48,10 +48,11 @@ jobs:
     with:
       ref: ${{ needs.resolve.outputs.tag }}
       version: ${{ needs.resolve.outputs.version }}
-      # Only the moving tag: a release's exact version tag is never overwritten, so anyone pinned
-      # to it keeps the image they reviewed.
+      # Only the moving tags (latest, X.Y and X): a release's exact version tag is never
+      # overwritten, so anyone pinned to it keeps the image they reviewed.
       tag-latest: true
       tag-version: false
+      tag-moving: true
       smoke: true
     secrets: inherit
 

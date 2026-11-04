@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { checkChangelog } from '../../scripts/check-changelog.ts'
 import { extractChangelogSection } from '../../scripts/extract-changelog-section.ts'
 import { resolvePlatformDigests } from '../../scripts/resolve-image-platforms.ts'
+import { checksumFile, INSTALLERS, stampInstaller } from '../../scripts/stamp-installers.ts'
 
 const SAMPLE = `# Changelog
 
@@ -76,5 +77,75 @@ describe('resolvePlatformDigests', () => {
       { platform: 'linux/amd64', digest: 'sha256:a' },
       { platform: 'linux/arm64', digest: 'sha256:b' },
     ])
+  })
+})
+
+describe('installers', () => {
+  const sources = Object.fromEntries(
+    INSTALLERS.map((name) => [name, readFileSync(`install/${name}`, 'utf8')]),
+  )
+
+  it('carry the version placeholder exactly once, so a release can stamp them', () => {
+    for (const name of INSTALLERS) {
+      expect(stampInstaller(name, sources[name] as string, '1.2.3')).toContain('1.2.3')
+      expect(stampInstaller(name, sources[name] as string, '1.2.3')).not.toContain('__VERSION__')
+    }
+  })
+
+  it('refuse a malformed version or a missing placeholder', () => {
+    expect(() => stampInstaller('install.sh', 'VERSION="__VERSION__"', 'v1.2.3')).toThrow(/version/)
+    expect(() => stampInstaller('install.sh', 'VERSION="1"', '1.2.3')).toThrow(/exactly once/)
+    expect(() => stampInstaller('install.sh', '__VERSION__ __VERSION__', '1.2.3')).toThrow(
+      /exactly once/,
+    )
+  })
+
+  it('write the shell script with Unix line endings', () => {
+    expect(stampInstaller('install.sh', '#!/bin/sh\r\nV=__VERSION__\r\n', '1.2.3')).toBe(
+      '#!/bin/sh\nV=1.2.3\n',
+    )
+  })
+
+  it('stay plain ASCII, which Windows PowerShell 5.1 needs in a file without a byte-order mark', () => {
+    for (const name of INSTALLERS) {
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: the point is to find anything outside 7-bit ASCII
+      expect(sources[name]).not.toMatch(/[^\x00-\x7F]/)
+    }
+  })
+
+  it('install.sh does nothing until its last line, so a truncated download runs nothing', () => {
+    const lines = (sources['install.sh'] as string).split('\n')
+    expect(lines.filter((line) => line.trim() !== '').at(-1)).toBe('main "$@"')
+    expect(lines.filter((line) => line === 'main "$@"')).toHaveLength(1)
+    // Function bodies are indented, so a command that starts in column 0 would run as soon as
+    // the shell reads it.
+    expect(
+      lines.filter((line) =>
+        /^(trap|rm|curl|sudo|npm|node|launchctl|brew|mkdir|cat|cd) /.test(line),
+      ),
+    ).toEqual([])
+  })
+
+  it('write checksums in the format sha256sum reads', () => {
+    expect(checksumFile([{ name: 'a.txt', contents: 'abc' }])).toBe(
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  a.txt\n',
+    )
+  })
+
+  it('install.sh writes the same launchd file as deploy/launchd', () => {
+    const embedded = /<<'PLIST_EOF'\n([\s\S]*?)\nPLIST_EOF/.exec(
+      sources['install.sh'] as string,
+    )?.[1]
+    const template = readFileSync('deploy/launchd/com.apilbeam101.tax-tracker.plist', 'utf8')
+    // Comments differ by design (the template explains hand use); everything else must match.
+    const withoutComments = (xml: string) =>
+      xml
+        .split('<!--')
+        .map((part, index) => (index === 0 ? part : part.slice(part.indexOf('-->') + 3)))
+        .join('')
+    const canonical = (xml: string) =>
+      withoutComments(xml).replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim()
+    expect(embedded).toBeDefined()
+    expect(canonical(embedded as string)).toBe(canonical(template))
   })
 })
