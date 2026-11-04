@@ -150,6 +150,8 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 The published port is bound to `127.0.0.1` only, same as the non-Docker setup — put it behind a reverse proxy (see [Reverse proxy (HTTPS)](#reverse-proxy-https) below) rather than exposing it directly. `npm start -- backup --data-dir ./data` on the host (add `--env-file .env` if your settings live there) works against the bind-mounted `data/taxtracker.db`.
 
+The image's entrypoint is the `tax-tracker` command with `start` as its default, so one-off commands run in the same image (`docker compose -f deploy/docker-compose.yml run --rm tax-tracker info`). Containers stay in env-supplied mode (`AUTO_CONFIG=false`) unless you set `AUTO_CONFIG=true`.
+
 ---
 
 ## Optional: Live prices (Tiingo)
@@ -205,11 +207,13 @@ tax-tracker import <file.json>         # into an empty database; --replace to ov
 
 The commands that read your data (`export`, `import`, `keys`) ask for your passphrase, or your recovery key if you have forgotten it. Once your data is encrypted, the app flags older unencrypted copies (earlier backups, `.bak` files, Ghostfolio exports) with a badge in the navigation bar and lets you delete them from the **Backups & archive** tab.
 
+`tax-tracker keys rotate` replaces the key that encrypts your data and re-encrypts every record under the new one. Stop the app first; a `pre-rotation` backup is taken, you type your current passphrase (the recovery key is not accepted here), and you get a new recovery key to store, because the old one stops working. If an unattended key slot exists, the command needs the `ENCRYPTION_KEY` (or `ENCRYPTION_KEY_FILE`) that opens it, in its environment, and carries it over; with a key that does not open it, or none, the command stops, unless you pass `--drop-unattended` to remove the slot (add it back later with `keys add-unattended`). It never creates an unattended slot that did not exist. Backups and archives made before a rotation still open with the passphrase or recovery key they were made under.
+
 Backups are named `taxtracker-<timestamp>-<reason>.db`. A backup is also taken automatically before an update changes the database (`pre-migration`) and before a restore or a replace-import; those are kept. `BACKUP_SCHEDULE=daily` (the default in self-configured mode, `off` otherwise) adds one a day; the last 14 manual and the last 14 scheduled backups are kept.
 
 **Restoring from the app** stages the uploaded file, and the swap happens the next time the app starts, before the database is opened. Set `RESTORE_RESTART=exit` where a supervisor restarts the app when it exits (Docker with `restart: unless-stopped`, Kubernetes, systemd with `Restart=always`) and the app exits by itself after staging; otherwise restart it yourself. Anything written between staging and the restart is discarded. If `ENCRYPTION_KEY` is set and cannot open the backup's unattended key slot, the restore is refused rather than leaving the app unable to start.
 
-**Restoring in a container.** `tax-tracker restore` refuses while the app container is running (it checks a lock file the app refreshes every few seconds in the data volume). Stop the app, then run it from a one-off container that mounts the same volume, for example `docker compose run --rm --entrypoint node app dist/server/cli.js restore /app/data/backups/<file>.db --yes`. On Kubernetes, scale the app to zero and run a Job or pod that mounts the same claim.
+**Restoring in a container.** `tax-tracker restore` refuses while the app container is running (it checks a lock file the app refreshes every few seconds in the data volume). Stop the app, then run it from a one-off container that mounts the same volume, for example `docker compose -f deploy/docker-compose.yml run --rm tax-tracker restore /app/data/backups/<file>.db --yes` (the image's entrypoint is the `tax-tracker` command, so anything after the service name is a `tax-tracker` command; with no arguments it runs `start`). To run a command in the running container instead, `docker compose exec tax-tracker tax-tracker backup`. On Kubernetes, scale the app to zero and run a Job or pod that mounts the same claim.
 
 ---
 

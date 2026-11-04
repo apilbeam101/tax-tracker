@@ -32,6 +32,7 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "changelog:check": "tsx scripts/check-changelog.ts",
     "pack:check": "tsx scripts/check-pack-allowlist.ts",
     "pack:smoke": "tsx scripts/smoke-pack.ts"
   },

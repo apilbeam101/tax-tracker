@@ -44,7 +44,7 @@ export interface UpgradeResult {
   scrubbed: boolean
 }
 
-function tablesWithEncryptedColumns(): string[] {
+export function tablesWithEncryptedColumns(): string[] {
   return Object.keys(FIELD_REGISTRY).filter((table) => encryptedColumns(table).length > 0)
 }
 
@@ -297,7 +297,14 @@ export function scrubDatabase(db: Db): boolean {
   }
 }
 
-function scrubAndRecord(db: Db): boolean {
+// Events for key changes made outside the upgrade (a rotation of the data key): a new recovery key
+// is unconfirmed until it is typed back, and the clean-up is pending until it verifiably completes.
+export function recordKeyRotation(db: Db): void {
+  recordEvent(db, EVENT.recoveryRotated)
+  recordEvent(db, EVENT.scrubPending)
+}
+
+export function scrubAndRecord(db: Db): boolean {
   const done = scrubDatabase(db)
   if (done) {
     try {

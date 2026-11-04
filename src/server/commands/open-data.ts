@@ -24,6 +24,20 @@ export interface DataContext {
   close(): void
 }
 
+// Commands that touch stored values need the schema this version expects.
+export function assertMigrated(db: DatabaseSync): void {
+  const applied = new Set(
+    (db.prepare('SELECT filename FROM _migrations').all() as Array<{ filename: string }>).map(
+      (m) => m.filename,
+    ),
+  )
+  if (listMigrationFiles().some((f) => !applied.has(f))) {
+    throw new CliError(
+      'The database needs updating. Start the app once to apply updates, then retry.',
+    )
+  }
+}
+
 // Opens the database the way the server does once it is unlocked, for commands that read or write
 // decrypted values. A protected database asks for the passphrase; the key lives only in this
 // process's keyring and is wiped on close. Never migrates: a database behind this version has to
@@ -40,16 +54,7 @@ export async function openData(
   db.exec('PRAGMA secure_delete = ON')
   const keyring = new Keyring({ protected: false })
   try {
-    const applied = new Set(
-      (db.prepare('SELECT filename FROM _migrations').all() as Array<{ filename: string }>).map(
-        (m) => m.filename,
-      ),
-    )
-    if (listMigrationFiles().some((f) => !applied.has(f))) {
-      throw new CliError(
-        'The database needs updating. Start the app once to apply updates, then retry.',
-      )
-    }
+    assertMigrated(db)
 
     if (isEncryptedDatabase(db)) {
       const dek = await unlockDatabase(db, await passphrase())

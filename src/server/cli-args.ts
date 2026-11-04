@@ -14,7 +14,12 @@ export const COMMANDS = [
 ] as const
 export type Command = (typeof COMMANDS)[number]
 
-export const KEYS_SUBCOMMANDS = ['add-unattended', 'remove-unattended', 'rotate-recovery'] as const
+export const KEYS_SUBCOMMANDS = [
+  'add-unattended',
+  'remove-unattended',
+  'rotate-recovery',
+  'rotate',
+] as const
 export type KeysSubcommand = (typeof KEYS_SUBCOMMANDS)[number]
 
 export interface ParsedCli {
@@ -25,6 +30,7 @@ export interface ParsedCli {
   plaintext: boolean
   replace: boolean
   yes: boolean
+  dropUnattended: boolean
   port: string | undefined
   host: string | undefined
   dataDir: string | undefined
@@ -47,6 +53,8 @@ Commands:
   keys add-unattended   Add the unattended unlock slot, using ENCRYPTION_KEY or ENCRYPTION_KEY_FILE
   keys remove-unattended
   keys rotate-recovery  Replace the recovery key and print the new one once
+  keys rotate           Replace the data encryption key and re-encrypt everything (app stopped;
+                        takes a backup first; prints a new recovery key once)
   restore <file>        Replace the database with a backup (the app must not be running)
   export                Write a versioned JSON archive of your data, encrypted with an export passphrase
   import <file>         Load an archive into an empty database (--replace to overwrite existing data)
@@ -56,6 +64,7 @@ Options:
   --plaintext           Export without encryption (asks for confirmation)
   --replace             Import over existing data, after a backup (asks for confirmation)
   -y, --yes             Skip those confirmations (for scripts and shells without a terminal)
+  --drop-unattended     With keys rotate: remove the unattended key slot instead of keeping it
   --port <n>            Port to listen on (0 picks a free port)
   --host <address>      Address to listen on
   --data-dir <path>     Where the database and config file live
@@ -91,6 +100,7 @@ function parseFlags(argv: string[]) {
         plaintext: { type: 'boolean' },
         replace: { type: 'boolean' },
         yes: { type: 'boolean', short: 'y' },
+        'drop-unattended': { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -111,6 +121,7 @@ export function parseCli(argv: string[]): ParsedCli {
     plaintext: values.plaintext === true,
     replace: values.replace === true,
     yes: values.yes === true,
+    dropUnattended: values['drop-unattended'] === true,
     port: values.port === undefined ? undefined : parsePort(values.port),
     host: values.host,
     dataDir: values['data-dir'],

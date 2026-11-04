@@ -20,6 +20,7 @@ export const BACKUP_REASONS = [
   'pre-migration',
   'pre-restore',
   'pre-import',
+  'pre-rotation',
 ] as const
 export type BackupReason = (typeof BACKUP_REASONS)[number]
 

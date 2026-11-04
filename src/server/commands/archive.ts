@@ -12,29 +12,15 @@ import {
 } from '../services/backup/archive.ts'
 import { createBackup } from '../services/backup/backups.ts'
 import { applyPendingRestore, stageRestore } from '../services/backup/restore.ts'
-import {
-  isServerRunning,
-  serverLockIsFresh,
-  writeServerLock,
-} from '../services/backup/server-lock.ts'
+import { serverLockIsFresh } from '../services/backup/server-lock.ts'
 import { recalcAllInstruments } from '../services/tax/recalc.ts'
+import { claimDataDir, RUNNING_MESSAGE } from './data-dir-lock.ts'
 import { appVersion } from './info.ts'
 import type { PassphraseSource } from './keys.ts'
 import { openData } from './open-data.ts'
 import { CliError, dataPaths, errorMessage } from './util.ts'
 
 const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
-
-const RUNNING_MESSAGE = (dataDir: string) =>
-  `The app appears to be running: server.lock in ${dataDir} was refreshed recently. Stop it first (in a container, stop the app container; a one-off container on the same volume is fine). If it was just stopped or crashed, wait 30 seconds and retry.`
-
-// Refuses while a server holds the data directory, then holds it itself for the rest of the
-// command, so a server that starts meanwhile waits instead of opening a database that is about to
-// be swapped or rewritten.
-async function claimDataDir(dataDir: string): Promise<void> {
-  if (await isServerRunning(dataDir)) throw new CliError(RUNNING_MESSAGE(dataDir))
-  writeServerLock(dataDir)
-}
 
 // The key the server will be started with, so a restore it could not open is refused here rather
 // than turning into a restart loop. A key that cannot be read is simply not checked.

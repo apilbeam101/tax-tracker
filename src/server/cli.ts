@@ -65,12 +65,40 @@ async function confirm(question: string, word: string): Promise<void> {
   if ((await promptLine(question, '')) !== word) throw new CliError('Cancelled.')
 }
 
-async function keys(sub: string): Promise<void> {
+async function keys(sub: string, dropUnattended: boolean): Promise<void> {
   const { addUnattended, removeUnattended, rotateRecovery } = await import('./commands/keys.ts')
   const passphrase = () => promptSecret('Passphrase or recovery key: ')
   if (sub === 'add-unattended') console.log(await addUnattended(process.env, passphrase))
   else if (sub === 'remove-unattended') console.log(await removeUnattended(process.env, passphrase))
-  else {
+  else if (sub === 'rotate') {
+    const { runRotate } = await import('./commands/rotate.ts')
+    await confirm(
+      'This replaces the key that encrypts all of your data and re-encrypts every record. The app must be stopped; a backup is taken first. Type "rotate" to continue',
+      'rotate',
+    )
+    const report = await runRotate(process.env, () => promptSecret('Current passphrase: '), {
+      dropUnattended,
+    })
+    console.log(
+      `Rotated the data key (${report.previousKeyId} -> ${report.keyId}); ${report.rowsRewritten} rows re-encrypted. Backup of the previous state: ${report.backup}`,
+    )
+    console.log(
+      `New recovery key (shown once, store it somewhere safe):\n\n  ${report.recoveryKey}\n`,
+    )
+    console.log(
+      'The previous recovery key no longer works. Confirm the new one the next time you sign in.',
+    )
+    if (report.unattendedSlot === 'dropped') {
+      console.log(
+        'The unattended key slot was removed (--drop-unattended). Run "keys add-unattended" with ENCRYPTION_KEY set to restore unattended unlock.',
+      )
+    }
+    if (!report.scrubbed) {
+      console.log(
+        'Clean-up of old ciphertext did not finish; it is retried when the app next starts.',
+      )
+    }
+  } else {
     const recoveryKey = await rotateRecovery(process.env, passphrase)
     console.log(`New recovery key (shown once, store it somewhere safe):\n\n  ${recoveryKey}\n`)
     console.log('The previous recovery key no longer works. Confirm the new one in the app.')
@@ -113,7 +141,7 @@ async function run(cli: ParsedCli): Promise<void> {
       return
     }
     case 'keys':
-      return keys(cli.subcommand as string)
+      return keys(cli.subcommand as string, cli.dropUnattended)
     case 'restore': {
       const { runRestore } = await import('./commands/archive.ts')
       await confirm(

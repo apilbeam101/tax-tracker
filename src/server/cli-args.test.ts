@@ -27,7 +27,8 @@ describe('parseCli', () => {
       subcommand: 'rotate-recovery',
     })
     expect(() => parseCli(['keys'])).toThrow(UsageError)
-    expect(() => parseCli(['keys', 'rotate'])).toThrow(UsageError)
+    expect(parseCli(['keys', 'rotate'])).toMatchObject({ command: 'keys', subcommand: 'rotate' })
+    expect(() => parseCli(['keys', 'rotate-everything'])).toThrow(UsageError)
     expect(() => parseCli(['keys', 'add-unattended', 'extra'])).toThrow(UsageError)
   })
 
