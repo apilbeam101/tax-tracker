@@ -471,9 +471,8 @@ as it isn't derivable from the stored data.
 
 ## Phase 8 — Repository hygiene, error handling, and packaging ✅ COMPLETE
 
-**Goal:** close CI/security/testing gaps found by comparing against a sibling project's
-more mature setup; add Docker as an additional self-hosting option. See DESIGN.md §12
-for rationale.
+**Goal:** close CI/security/testing gaps; add Docker as an additional self-hosting option.
+See DESIGN.md §12 for rationale.
 
 **Deliverables:**
 

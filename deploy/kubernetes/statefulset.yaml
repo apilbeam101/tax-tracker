@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tax-tracker
+  namespace: tax-tracker
+  labels:
+    app.kubernetes.io/name: tax-tracker
+spec:
+  serviceName: tax-tracker
+  # DELIBERATELY 1: SQLite must never have two writers. Do not scale this up; a second pod on the
+  # same volume would corrupt the database, and a second volume would be a second, separate copy
+  # of your data.
+  replicas: 1
+  # A StatefulSet replaces its pod by deleting the old one before creating the new one, so a
+  # rollout never has two pods running at once. A Deployment's default rolling update briefly
+  # runs two (and needs strategy: Recreate to avoid it), which is why this is not a Deployment.
+  updateStrategy:
+    type: RollingUpdate
+  # Deleting or scaling down the StatefulSet must not delete the data.
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tax-tracker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tax-tracker
+    spec:
+      # The app never calls the Kubernetes API, so the service account token is not mounted.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        # Makes the volume writable by the image's user, whatever its provisioner set.
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: tax-tracker
+          # Pin at least the minor tag (monthly rebuilds refresh it with base-image patches). An
+          # exact tag such as 0.1.0 never changes and so never gets those patches. For the
+          # strongest guarantee pin a digest (image@sha256:...). Images are pulled by the kubelet,
+          # so the NetworkPolicy does not need an egress rule for ghcr.io.
+          image: ghcr.io/apilbeam101/tax-tracker:0.1
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: tax-tracker-config
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          # /health answers while the data is still locked (waiting for a passphrase), so a pod
+          # that is waiting for someone to sign in is Ready and is not restarted.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            # A starting point sized for one user, not a measured ceiling. Generating a long PDF
+            # report is the heaviest operation; raise the memory limit if it is killed.
+            requests:
+              cpu: 50m
+              memory: 192Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            # SQLite spills large sort and index work here; the root filesystem is read-only.
+            - name: tmp
+              mountPath: /tmp
+            - name: secrets
+              mountPath: /etc/tax-tracker/secrets
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: secrets
+          secret:
+            secretName: tax-tracker-secrets
+            # Readable by the pod's group (fsGroup) only.
+            defaultMode: 0440
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: tax-tracker
+      spec:
+        accessModes: [ReadWriteOnce]
+        # Set storageClassName to pick a class; the cluster default is used otherwise.
+        resources:
+          requests:
+            # The database is a few megabytes for years of records; backups (up to 14 manual and
+            # 14 scheduled) and archive exports are the bulk.
+            storage: 1Gi

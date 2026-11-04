@@ -38,7 +38,7 @@ These changes help every install path, so they come first. No packaging yet.
    - `buildConfig()` rejects placeholder values (`CHANGE_ME…`) and secrets shorter than 32 bytes (64 hex chars).
    - `ENCRYPTION_KEY` becomes optional. It's the unattended-unlock key for server deployments (Phase 2).
    - Extend the Pino redaction paths ([logging.ts](../../src/server/config/logging.ts)) to cover key material and the request bodies of the setup and unlock routes.
-5. **Version endpoint.** `/health` returns `{ status, version, commit }`. `version` comes from `package.json`, and `commit` from a `GIT_COMMIT` build arg/env var, matching the exporters.
+5. **Version endpoint.** `/health` returns `{ status, version, commit }`. `version` comes from `package.json`, and `commit` from a `GIT_COMMIT` build arg/env var.
 
 Tests: unit tests for `packageRoot()`, data-dir precedence, `_FILE` resolution, placeholder rejection, the logger fallback, and cookie `secure` resolution (using a live Fastify instance with `trustProxy`, not mocks; see the phased-review memory). A redaction test checks that logging a fake unlock request emits no key material.
 
@@ -161,7 +161,7 @@ Self-configured mode is the default for `npx` / global installs, because a one-c
   - `doctor`: checks the Node version, data-dir permissions, DB `integrity_check`, port availability, secret validity and key-slot integrity. It also confirms that `config.json` contains no key material and that the unattended key file isn't inside the data dir. It never prints or asks for key material. This is the first thing a support issue would ask for.
 - Rename the package to `uk-tax-tracker` (free on npm as of 2026-10-28). The `bin` name stays `tax-tracker`; `npx uk-tax-tracker` still works because it's the package's only bin.
 - `"files": ["dist", "LICENSE", "README.md"]`. Also move `pino-pretty` to `optionalDependencies` or leave it dev-only, given the Phase 1 fallback.
-- Port `scripts/check-pack-allowlist.ts` from the exporters. Required entries: `dist/server/cli.js`, `dist/server/main.js`, `dist/client/index.html`, `dist/server/db/migrations/001_core_schema.sql`. Run it in CI. It also guards against `.env` or `data/` ever reaching the tarball.
+- Add `scripts/check-pack-allowlist.ts`. Required entries: `dist/server/cli.js`, `dist/server/main.js`, `dist/client/index.html`, `dist/server/db/migrations/001_core_schema.sql`. Run it in CI. It also guards against `.env` or `data/` ever reaching the tarball.
 - **Don't** port `check-no-native-addons.ts`, because `@node-rs/argon2` is a native addon. Instead, add a CI matrix job (`ubuntu`, `macos`, `windows`) that runs `npm pack`, installs the tarball into a clean dir, starts `tax-tracker --port 0` and probes `/health`. That proves the prebuilt argon2 binary resolves on each OS.
 - `scripts/backup.ts` and `scripts/backfill-fx.ts` become CLI subcommands. Delete the npm scripts that wrapped them, along with the `--env-file` dependency.
 
@@ -240,7 +240,7 @@ As built (Phase 4):
 
 ### 5b. Release pipeline and image publication
 
-Ported from technitium/kea-metrics-exporter, which are already SHA-pinned and match this repo's CI.
+Third-party actions are pinned by commit SHA, and Dependabot keeps the pins current.
 
 - `scripts/extract-changelog-section.ts` and a CHANGELOG format check.
 - `.github/workflows/release.yml`, triggered on a `v*.*.*` tag:
@@ -254,13 +254,13 @@ Ported from technitium/kea-metrics-exporter, which are already SHA-pinned and ma
 - Dockerfile changes:
   - `GIT_COMMIT` / `IMAGE_VERSION` build args and OCI labels.
   - Entrypoint becomes the CLI (`node dist/server/cli.js start`), so `docker compose exec tax-tracker tax-tracker backup` works.
-  - **Native-addon caveat:** the exporters run `npm ci` in a `--platform=$BUILDPLATFORM` stage and copy `node_modules` across. That's only safe because they have no native addons. Here the prod-deps stage must run on the *target* platform, so the correct argon2 prebuilt is installed. The TS/Vite build stage can stay on `$BUILDPLATFORM`.
+  - **Native-addon caveat:** a common multi-arch pattern runs `npm ci` in a `--platform=$BUILDPLATFORM` stage and copies `node_modules` across, which is only safe for packages without native addons. Here the prod-deps stage must run on the *target* platform, so the correct argon2 prebuilt is installed. The TS/Vite build stage can stay on `$BUILDPLATFORM`.
 
 As built (Phase 5):
 - **5a, `keys rotate`:** [crypto/rotate.ts](../../src/server/crypto/rotate.ts) `rotateDataKey` and [commands/rotate.ts](../../src/server/commands/rotate.ts). Needs the **passphrase** (not the recovery key): it is wrapped around the new key and must remain what sign-in accepts. The command refuses while a server is running and holds `server.lock` itself (`commands/data-dir-lock.ts`, shared with `restore`/`import`), checks the schema is current, takes a `pre-rotation` backup (new `BackupReason`, kept like the other `pre-*`), then re-seals every classified column through `createRowCodec` under the new key, recomputes `ticker_bidx` in the same `UPDATE`, reads every row back, replaces the key slots (`prepareInitialSlots`: new DEK, new recovery key, passphrase slot; an existing unattended slot is carried over only if the supplied `ENCRYPTION_KEY` opens it, is dropped only with `--drop-unattended`, and is never created; a mistyped passphrase is rejected before the backup is taken, so failed attempts leave no `pre-rotation` copies; a COMMIT error that actually landed is reported as success, as in the upgrade), records the same audit events as a recovery-key rotation (so the new key is unconfirmed until typed back) plus `scrub_pending`, commits, then runs the 2d clean-up. Verified end to end with the built CLI against a real server (sign-in with the same passphrase, data intact, recovery key flagged for confirmation).
-- **5b, release pipeline:** ported from `apilbeam101/kea-metrics-exporter`, reusing its SHA pins (checked line by line against that repo's workflows). `release.yml` (verify, image, optional npm publish by OIDC trusted publishing with an npm >= 11.5.1 check and no stored token, GitHub Release from the CHANGELOG section), `_publish-image.yml` (amd64+arm64, GHCR, build provenance, per-platform SPDX SBOM attestations; plus a best-effort `mirror-dockerhub` job, as in the exporters, copying the manifest to `docker.io/<DOCKERHUB_USERNAME>/tax-tracker` with the `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` secrets passed down by `secrets: inherit`; a mirror failure does not fail the release, and attestations exist on GHCR only), `rebuild.yml` (monthly, `:latest` only, never the version tag), `scan.yml` (monthly Trivy to SARIF). `ci.yml` gains `changelog:check`, and a `docker` job that builds both platforms without pushing, then starts the amd64 image and probes `/health`, checks no `.env`/data/source is in the layers, and runs a one-off CLI command. Scripts: `extract-changelog-section.ts`, `check-changelog.ts`, `resolve-image-platforms.ts` (tests in `release-scripts.test.ts`).
+- **5b, release pipeline:** actions are pinned by commit SHA (see the pin verification below). `release.yml` (verify, image, optional npm publish by OIDC trusted publishing with an npm >= 11.5.1 check and no stored token, GitHub Release from the CHANGELOG section), `_publish-image.yml` (amd64+arm64, GHCR, build provenance, per-platform SPDX SBOM attestations; plus a best-effort `mirror-dockerhub` job copying the manifest to `docker.io/<DOCKERHUB_USERNAME>/tax-tracker` with the `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` secrets passed down by `secrets: inherit`; a mirror failure does not fail the release, and attestations exist on GHCR only), `rebuild.yml` (monthly, `:latest` only, never the version tag), `scan.yml` (monthly Trivy to SARIF). `ci.yml` gains `changelog:check`, and a `docker` job that builds both platforms without pushing, then starts the amd64 image and probes `/health`, checks no `.env`/data/source is in the layers, and runs a one-off CLI command. Scripts: `extract-changelog-section.ts`, `check-changelog.ts`, `resolve-image-platforms.ts` (tests in `release-scripts.test.ts`).
 - **Dockerfile:** production dependencies are installed in a stage running on the target platform; the build stage stays on `$BUILDPLATFORM`; `GIT_COMMIT` / `IMAGE_VERSION` build args, OCI labels, `ENTRYPOINT ["node","dist/server/cli.js"]` with `CMD ["start"]`, and `tax-tracker` on `PATH`. `AUTO_CONFIG=false` is set in the image so containers keep the env-supplied default now that the CLI (which defaults to self-configured) is the entrypoint; Phase 6's compose file opts in with `AUTO_CONFIG=true`.
-- **Review follow-ups (Opus):** `release.yml` has a `concurrency` group and publishes pre-releases to the npm `next` dist-tag; the `deps` stage runs `node -e "require('@node-rs/argon2')"` so a missing arm64 prebuilt fails the build; the entrypoint path is absolute and the commit/version build args sit after the cached layers. **Accepted and recorded:** `:latest` is set by any non-pre-release tag and `rebuild.yml` picks the most recently created release, so a backport tag on an older line would move `:latest` back; Trivy scans the runner's platform (amd64) only; the lock heartbeat cannot fire during a synchronous stretch longer than 30 s (large databases); `keys add-unattended`/`rotate-recovery` do not take the data-dir lock, so running one at the same time as `keys rotate` is unsupported; base images are tracked by tag, not digest (the monthly rebuild is the mitigation); the reusable workflow runs the tagged commit's `scripts/` when rebuilding an old tag. The trivy-action pin is the one already used in the exporter repositories; its provenance was not independently re-verified.
+- **Review follow-ups (Opus):** `release.yml` has a `concurrency` group and publishes pre-releases to the npm `next` dist-tag; the `deps` stage runs `node -e "require('@node-rs/argon2')"` so a missing arm64 prebuilt fails the build; the entrypoint path is absolute and the commit/version build args sit after the cached layers. **Accepted and recorded:** `:latest` is set by any non-pre-release tag and `rebuild.yml` picks the most recently created release, so a backport tag on an older line would move `:latest` back; Trivy scans the runner's platform (amd64) only; the lock heartbeat cannot fire during a synchronous stretch longer than 30 s (large databases); `keys add-unattended`/`rotate-recovery` do not take the data-dir lock, so running one at the same time as `keys rotate` is unsupported; base images are tracked by tag, not digest (the monthly rebuild is the mitigation); the reusable workflow runs the tagged commit's `scripts/` when rebuilding an old tag.
 - **Pin verification (2026-11-02):** every pinned action in `.github/workflows/` was resolved through the GitHub API; each version tag still points at exactly the pinned commit. For `aquasecurity/trivy-action` v0.36.0 (`ed142fd0...`): the commit has a verified signature, is an ancestor of the default branch (`master`), and the tag is an annotated tag on it. The repository has one published advisory, GHSA-9p44-j4g5-cfx5 / CVE-2026-26189 (command injection through unsanitised inputs, affects 0.31.0 to 0.34.0, fixed in 0.34.1), so v0.36.0 is patched, and `scan.yml` only passes constant inputs anyway. A search of the repository for reports of a compromise or force-pushed tags found nothing; that does not prove none occurred elsewhere.
 - **Not verifiable here:** no Docker is installed on the development machine, so the Dockerfile, the multi-arch build and every workflow have only been checked for YAML syntax and by reading; the first real run is CI on the pull request, and the first release run is the first tag. Before the first tag, also: configure the npm trusted publisher for this repository and workflow, and set `NPM_PUBLISH_ENABLED`; promote `[Unreleased]` to a release section (the release job fails without one); the package version is still `0.1.0`.
 
@@ -287,7 +287,7 @@ Done by the maintainer after Phase 5 is committed (Claude does not push, tag or 
 - Bind-mount users get a documented alternative with the `chown` step, kept out of the default path.
 
 ### Kubernetes (`deploy/kubernetes/`)
-Adapted from the exporter manifests, with SQLite-specific constraints:
+SQLite-specific constraints apply:
 - A `StatefulSet` with `replicas: 1` and a `ReadWriteOnce` PVC (or a Deployment with `strategy: Recreate`). SQLite must never have two writers, so a rolling update must not overlap pods.
 - `secret.example.yaml` (`SESSION_SECRET`, plus optional `ENCRYPTION_KEY` for unattended unlock, mounted as files rather than env vars), `configmap.yaml`, `service.yaml`, `networkpolicy.yaml` (ingress from the ingress controller only, egress to DNS plus the FX and price providers on 443), and `ingress.example.yaml`.
 - `cronjob-backup.example.yaml`: runs `tax-tracker backup` against the same PVC. Optional, since the in-process schedule also works.
@@ -297,6 +297,17 @@ Adapted from the exporter manifests, with SQLite-specific constraints:
 ### Bare metal
 - `deploy/systemd/tax-tracker.service`: a hardened unit (`ProtectSystem=strict`, `StateDirectory=tax-tracker`, so the data dir is managed by systemd). Secrets come via `LoadCredential=` rather than `EnvironmentFile=`.
 - `deploy/launchd/com.apilbeam101.tax-tracker.plist`: used by the macOS installer.
+
+### As built (Phase 6, deployment artefacts)
+
+The files are in `deploy/compose/`, `deploy/kubernetes/`, `deploy/systemd/` and `deploy/launchd/`. Docs are not written yet.
+- **Checked here:** every Kubernetes manifest passes `kubectl create --dry-run=client`, `kubectl kustomize deploy/kubernetes` renders, the plist is well-formed XML, the compose files parse, and the app's own `tax-tracker doctor` accepts the exact environment each file sets (compose self-configured, Kubernetes and systemd env-supplied with `*_FILE` secrets, `TRUST_PROXY` `uniquelocal` and `loopback`).
+- **Not checked (no Docker, systemd or macOS here):** `docker compose config` and a real `up`, the Caddy profile, the pod running under the `restricted` Pod Security level, `systemd-analyze security` and a real unit start, and `launchctl bootstrap`. The first run of each is the first real test.
+- **Design points:** a single-writer rollout that never runs two pods on the database (a StatefulSet deletes the old pod before creating the new one), `automountServiceAccountToken: false`, a NetworkPolicy whose caveats are documented in the file (the CNI must enforce it, the ingress namespace selector must match the real controller, image pulls are done by the kubelet), image-pin guidance (minor tag, or a digest for the strongest guarantee), and Secret handling notes (base64 is not encryption, prefer sealed or external secrets).
+- **Restart behaviour:** a restore uploaded from the app makes the app exit with status 0 (`RESTORE_RESTART=exit`), so a restart policy that only covers failures would not bring it back; launchd uses an unconditional `KeepAlive` and systemd `Restart=always`. `/health` answers while the data is locked, so probes use it for liveness and readiness (a pod waiting for a passphrase is Ready). `BACKUP_SCHEDULE` is on by default only in self-configured mode, so the Kubernetes ConfigMap and the systemd unit set it. A restore upload can be up to 500 MB, so the ingress example raises ingress-nginx's 1 MB body limit. Kubernetes and systemd use env-supplied mode with the session secret as a mounted file or credential; compose uses self-configured mode on a named volume.
+- **Image tags:** the files pin the minor tag (`0.1`). `_publish-image.yml` currently pushes only the exact version and `:latest`, and the monthly rebuild refreshes only `:latest`, so a user pinned to an exact version never receives base-image patches. Adding `X.Y` and `X` tags for non-pre-release versions (and refreshing them in the rebuild) is needed for the pinning advice to work.
+- **Old compose file:** `deploy/docker-compose.yml` stays until the README is rewritten, because the README still points at it. Delete it with that rewrite.
+- **Price provider:** the code calls Yahoo Finance (`services/prices/yahoo.ts`), not Stooq, which settles the tidy-up item below; CLAUDE.md still says Stooq.
 
 ### Docs
 - `docs/INSTALL.md`: a decision table ("which install is right for me?") linking to:
@@ -318,7 +329,7 @@ Adapted from the exporter manifests, with SQLite-specific constraints:
 
 Both scripts:
 1. Check for Node ≥ 24. If it's missing, offer to install it:
-   - macOS: Homebrew if present, else the official `.pkg`, downloaded and verified against a pinned SHA-256, matching the exporters' `verified-download` pattern.
+   - macOS: Homebrew if present, else the official `.pkg`, downloaded and verified against a pinned SHA-256.
    - Windows: `winget install OpenJS.NodeJS.LTS`.
 
    Never silently upgrade an existing Node.
@@ -338,7 +349,7 @@ Also:
 
 ## Phase 8: Public-repo hygiene
 
-- `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue and PR templates. Copy from the exporters and adapt.
+- `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue and PR templates.
 - The bug report template asks for `tax-tracker doctor` output and explicitly warns against pasting real financial data (repo is public).
 - `svelte-check` in CI for the client. This is tracked separately in the dev-tooling-backlog memory; include it here only if time permits.
 

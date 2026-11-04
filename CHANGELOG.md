@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+### Added
+
+- Deployment files for the published image. `deploy/compose/`: a Compose file with a named data volume (no `chown` step), loopback-only port, read-only root filesystem, dropped capabilities and a daily backup, an optional Caddy sidecar for automatic HTTPS (`--profile https`), a commented unattended-unlock block, and an override for building from source. `deploy/kubernetes/`: a single-replica StatefulSet with a persistent volume (a rolling update never runs two pods on the database), ConfigMap, a Secret template with the session secret mounted as a file, Service, NetworkPolicy and a `kubectl apply -k` kustomization, plus example Ingress and backup CronJob files. `deploy/systemd/tax-tracker.service`: a hardened unit with a managed state directory and credentials delivered with `LoadCredential`. `deploy/launchd/`: a per-user LaunchAgent template.
+
 ## [0.1.0-rc.1] - 2026-11-04
 
 ### Added

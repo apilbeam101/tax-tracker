@@ -697,8 +697,7 @@ claude-tax/
 
 ## 12. Repository hygiene, CI, and packaging
 
-Added after v1's initial feature-complete state, informed by lessons from a sibling
-project's more mature CI/security setup.
+Added after v1's initial feature-complete state.
 
 **Linting is Biome, not ESLint.** `typescript-eslint` (the natural ESLint choice for a
 TypeScript project) only supports TypeScript `<6.1.0` as a peer dependency; this project

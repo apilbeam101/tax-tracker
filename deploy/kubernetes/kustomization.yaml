@@ -1,0 +1,14 @@
+# kubectl apply -k deploy/kubernetes
+#
+# Create the Secret first (see secret.example.yaml); it is not listed here so a populated copy
+# can never be committed by accident. The *.example.yaml files are optional extras to copy and
+# apply separately.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: tax-tracker
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - service.yaml
+  - statefulset.yaml
+  - networkpolicy.yaml
