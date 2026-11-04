@@ -2,6 +2,7 @@
  * Packs the project, installs the tarball into an empty directory, starts it on a free port and
  * probes /health. Proves the published package runs on this OS, including the prebuilt argon2
  * binary. Usage: npm run build && npm run pack:smoke
+ * SMOKE_NPM_VERSION=12 installs the tarball with that npm release instead of the running one.
  */
 import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -23,7 +24,7 @@ async function main(): Promise<void> {
     filename: string
   }>
   const tarball = join(packDir, (pack as { filename: string }).filename)
-  runNpm(['install', '--no-audit', '--no-fund', tarball], installDir)
+  runNpm(['install', '--no-audit', '--no-fund', tarball], installDir, installerCli())
 
   const cli = join(installDir, 'node_modules', 'uk-tax-tracker', 'dist', 'server', 'cli.js')
   const child = spawn(process.execPath, [cli, 'start', '--port', '0', '--data-dir', dataDir], {
@@ -69,6 +70,19 @@ async function main(): Promise<void> {
     }
     removeWork()
   }
+}
+
+// npm 12 stopped running dependency install scripts and resolving git/URL dependencies by default,
+// so the install is also proven with the npm a user will have. Runners ship an older npm.
+function installerCli(): string | undefined {
+  const version = process.env.SMOKE_NPM_VERSION
+  if (!version) return undefined
+  const toolDir = join(work, 'npm-tool')
+  mkdirSync(toolDir)
+  runNpm(['install', '--no-audit', '--no-fund', '--prefix', toolDir, `npm@${version}`])
+  const cli = join(toolDir, 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  console.log(`Installing the tarball with npm ${runNpm(['--version'], work, cli).trim()}`)
+  return cli
 }
 
 // Windows can hold the SQLite files for a moment after the process exits.

@@ -113,6 +113,10 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run pack:smoke
+      - name: package smoke test installed with npm 12
+        run: npm run pack:smoke
+        env:
+          SMOKE_NPM_VERSION: "12"
 
   audit:
     name: npm audit (prod deps)
