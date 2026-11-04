@@ -51,18 +51,18 @@
     "pdfkit": "^0.20.2"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.14",
+    "@biomejs/biome": "~2.5.15",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@types/big.js": "^7.0.0",
     "@types/node": "^26.6.3",
     "@types/pdfkit": "^0.17.6",
-    "@vitest/coverage-v8": "^4.1.9",
+    "@vitest/coverage-v8": "^5.0.5",
     "pino": "^10.3.1",
     "svelte": "^5.57.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.1",
-    "vitest": "^4.1.9"
+    "vitest": "^5.0.5"
   },
   "optionalDependencies": {
     "pino-pretty": "^13.1.3"
