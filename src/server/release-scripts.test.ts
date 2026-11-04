@@ -138,12 +138,13 @@ describe('installers', () => {
     )?.[1]
     const template = readFileSync('deploy/launchd/com.apilbeam101.tax-tracker.plist', 'utf8')
     // Comments differ by design (the template explains hand use); everything else must match.
-    const canonical = (xml: string) =>
+    const withoutComments = (xml: string) =>
       xml
-        .replace(/<!--[\s\S]*?-->/g, '')
-        .replace(/\r\n/g, '\n')
-        .replace(/\s+/g, ' ')
-        .trim()
+        .split('<!--')
+        .map((part, index) => (index === 0 ? part : part.slice(part.indexOf('-->') + 3)))
+        .join('')
+    const canonical = (xml: string) =>
+      withoutComments(xml).replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim()
     expect(embedded).toBeDefined()
     expect(canonical(embedded as string)).toBe(canonical(template))
   })

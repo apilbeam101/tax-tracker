@@ -241,6 +241,9 @@ jobs:
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File install\install.ps1 -Uninstall -Purge -Yes -DataDir "$env:RUNNER_TEMP\not-ours" -AppDir "$env:RUNNER_TEMP\tt-app" -ShortcutDir "$env:RUNNER_TEMP\tt-shortcuts" 2>&1 | Out-Null
           if ($LASTEXITCODE -eq 0) { throw 'purge of a foreign folder was not refused' }
           if (-not (Test-Path "$env:RUNNER_TEMP\not-ours\keep.txt")) { throw 'a foreign folder was deleted' }
+          # The step would otherwise end with the exit code of the last native command, which is the
+          # refused purge above and is meant to be 1.
+          exit 0
 
   audit:
     name: npm audit (prod deps)
