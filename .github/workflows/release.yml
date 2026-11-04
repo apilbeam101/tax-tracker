@@ -115,11 +115,16 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: [verify, publish]
+    needs: [verify, publish, npm-publish]
+    # npm-publish is skipped when publishing is not enabled and may fail; the release is still
+    # created then, but without the installers, which install the version from npm.
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.publish.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -132,8 +137,26 @@ jobs:
           VERSION: ${{ needs.verify.outputs.version }}
         run: node --experimental-strip-types scripts/extract-changelog-section.ts "$VERSION" > release-notes.md
 
+      # The installers are attached with this release's version written in, so a pinned download
+      # URL always installs the version it belongs to. They install from npm, so they are only
+      # attached once that version has been published there.
+      - name: stamp and checksum the installers
+        if: needs.npm-publish.result == 'success'
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: node --experimental-strip-types scripts/stamp-installers.ts "$VERSION" release-assets
+
+      # A checksum file next to the scripts proves nothing about where they came from; the
+      # attestation does (gh attestation verify install.sh --repo <owner>/<repo>).
+      - name: attest the installers
+        if: needs.npm-publish.result == 'success'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release-assets/*
+
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           name: ${{ github.ref_name }}
           body_path: release-notes.md
           prerelease: ${{ needs.verify.outputs.is-prerelease == 'true' }}
+          files: release-assets/*
