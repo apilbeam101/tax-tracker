@@ -163,21 +163,6 @@ export async function encryptArchive(
   }
 }
 
-// One entry per format version that has been superseded: it turns that version's archive into the
-// next one, so old exports stay importable after the schema changes. Empty while only v1 exists.
-const ARCHIVE_MIGRATIONS = new Map<number, (archive: Archive) => Archive>()
-
-function migrateArchive(archive: Archive): Archive {
-  let current = archive
-  while (current.formatVersion < ARCHIVE_VERSION) {
-    const step = ARCHIVE_MIGRATIONS.get(current.formatVersion)
-    if (!step)
-      throw new BadRequestError(`Archive format version ${current.formatVersion} is not supported`)
-    current = step(current)
-  }
-  return current
-}
-
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -200,6 +185,10 @@ export async function parseArchive(text: string, passphrase?: string): Promise<A
     throw new BadRequestError(
       `The archive uses format version ${version}, which is newer than this version of Tax Tracker understands`,
     )
+  }
+  // Raising ARCHIVE_VERSION needs a migration for older archives before this check can be relaxed.
+  if (version < ARCHIVE_VERSION) {
+    throw new BadRequestError(`Archive format version ${version} is not supported`)
   }
 
   let data: unknown = raw.data
@@ -237,9 +226,7 @@ export async function parseArchive(text: string, passphrase?: string): Promise<A
     encrypted: false,
     data: data as ArchiveData,
   }
-  // Migrated to the current shape first, then checked against it.
-  const current = migrateArchive(archive)
-  return { ...current, data: validateArchiveData(current.data) }
+  return { ...archive, data: validateArchiveData(archive.data) }
 }
 
 const orUndefined = <T>(value: T | null | undefined): T | undefined => value ?? undefined
