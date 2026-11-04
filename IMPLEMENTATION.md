@@ -496,8 +496,8 @@ See DESIGN.md §12 for rationale.
 - [x] Fixture-based tests for the Tiingo, HMRC monthly CSV, and Frankfurter parsers
   (previously thin/no coverage of the actual parsing logic).
 - [x] `CHANGELOG.md` (Keep a Changelog format).
-- [x] Docker packaging (`Dockerfile`, `.dockerignore`, `deploy/docker-compose.yml`,
-  README "Docker" section) — non-root UID, `read_only` filesystem, `init: true`,
+- [x] Docker packaging (`Dockerfile`, `.dockerignore`, `deploy/compose/docker-compose.yml`,
+  `docs/INSTALL_DOCKER.md`) — non-root UID, `read_only` filesystem, `init: true`,
   loopback-only published port.
 - [x] `PRAGMA temp_store = MEMORY` (`src/server/db/database.ts`) — SQLite never needs a
   writable temp directory, in any deployment mode.

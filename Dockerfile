@@ -62,10 +62,10 @@ LABEL org.opencontainers.image.title="tax-tracker" \
 # predictable for volume permissions. Owns /app/data up front -- this only
 # actually takes effect for a fresh, empty NAMED volume (Docker copies the
 # image directory's content+ownership into it on first use) or when running
-# with no mount at all. A bind mount (what deploy/docker-compose.yml uses)
-# is NOT re-owned by Docker -- the host directory's existing ownership
-# governs, so it needs its own `chown -R 10001:10001` before first run;
-# see the comment at the top of deploy/docker-compose.yml.
+# with no mount at all. A bind mount (the alternative described in
+# deploy/compose/docker-compose.yml) is NOT re-owned by Docker -- the host
+# directory's existing ownership governs, so it needs its own
+# `chown -R 10001:10001` before first run.
 RUN groupadd --gid 10001 taxtracker \
     && useradd --uid 10001 --gid taxtracker --no-create-home --shell /usr/sbin/nologin taxtracker \
     && mkdir -p /app/data && chown taxtracker:taxtracker /app/data
@@ -90,7 +90,7 @@ req.on('error',()=>process.exit(1));\
 # Exec form avoids a shell wrapper swallowing signals -- but a process running
 # AS PID 1 has no default signal disposition at all (the kernel skips it), so
 # plain `node` as PID 1 actually IGNORES SIGTERM rather than exiting on it.
-# Run this with an init process in front (deploy/docker-compose.yml sets
+# Run this with an init process in front (deploy/compose/docker-compose.yml sets
 # `init: true`, or use `docker run --init`) so SIGTERM is forwarded to node
 # as a non-PID-1 process, where the normal default disposition applies.
 #

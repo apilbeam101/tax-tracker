@@ -591,10 +591,9 @@ without a rewrite:
 4. **Versioned migrations** from commit #1, auto-run on startup.
 5. **Config via `.env`.** DB path, bind address, keys — all injectable so the same binary
    runs single-user on localhost or multi-tenant in a container. `Dockerfile` +
-   `deploy/docker-compose.yml` now provide that container path as an additional
-   self-hosting option (non-root UID, `read_only` filesystem, bind-mounted SQLite data
-   directory) alongside the bare-Node/reverse-proxy setup — see the README's "Docker"
-   section.
+   `deploy/compose/` provide that container path as an additional self-hosting option
+   (non-root UID, `read_only` filesystem, SQLite data in a volume) alongside the
+   bare-Node/reverse-proxy setup — see `docs/INSTALL_DOCKER.md`.
 
 ---
 
@@ -680,8 +679,9 @@ claude-tax/
 │   └── shared/               Types shared between server and client
 ├── dist/                     Build output (gitignored)
 ├── data/                     SQLite DB file (gitignored)
-├── deploy/
-│   └── docker-compose.yml    Additional self-hosting option (see README "Docker")
+├── deploy/                   compose/, kubernetes/, systemd/, launchd/ (see docs/INSTALL.md)
+├── install/                  install.sh, install.ps1 (see docs/INSTALL_DESKTOP.md)
+├── docs/                     Guides: install, configuration, backups, security model
 ├── .github/
 │   ├── workflows/            ci.yml (lint/typecheck/test/build/audit), secrets.yml (gitleaks)
 │   └── dependabot.yml        Monthly npm + github-actions updates
@@ -734,5 +734,5 @@ temp b-trees to disk on large queries even under `PRAGMA temp_store = MEMORY`'s 
 avoid it — belt and suspenders) and a bind-mounted `/app/data`, `init: true` for correct
 SIGTERM handling (a plain Node process as container PID 1 ignores SIGTERM outright), and
 the published port bound to `127.0.0.1` only — same "always behind a reverse proxy"
-posture as the non-Docker deployment. See the README's "Docker" section for the mandatory
-pre-flight steps (real secrets, `chown` on the bind-mounted host data directory).
+posture as the non-Docker deployment. See `docs/INSTALL_DOCKER.md`; a named volume needs no
+setup, a bind-mounted host data directory needs a `chown` first.
