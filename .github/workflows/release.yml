@@ -71,6 +71,7 @@ jobs:
       ref: ${{ github.sha }}
       version: ${{ needs.verify.outputs.version }}
       tag-latest: ${{ needs.verify.outputs.is-prerelease != 'true' }}
+    secrets: inherit
 
   # npm trusted publishing: the registry accepts the workflow's OIDC identity, so no long-lived
   # token is stored. Needs the trusted publisher to be configured for this repository and workflow

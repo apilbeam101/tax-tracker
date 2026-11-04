@@ -208,3 +208,52 @@ jobs:
           subject-digest: ${{ matrix.entry.digest }}
           sbom-path: sbom.spdx.json
           push-to-registry: true
+
+  # Best-effort: `imagetools create` copies the index, its image layers and buildx's own in-index
+  # provenance, but not the separate OCI referrer manifests that actions/attest-build-provenance and
+  # actions/attest-sbom push above, which is what `gh attestation verify` checks. GHCR remains the
+  # attested source of truth; Docker Hub is a compatibility mirror. Needs the DOCKERHUB_USERNAME and
+  # DOCKERHUB_TOKEN secrets, passed down by the caller with `secrets: inherit`.
+  mirror-dockerhub:
+    name: Mirror to Docker Hub
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: mirror multi-arch manifest to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          VERSION: ${{ inputs.version }}
+          TAG_LATEST: ${{ inputs.tag-latest }}
+          TAG_VERSION: ${{ inputs.tag-version }}
+          SOURCE_IMAGE: ${{ needs.build.outputs.image }}
+          SOURCE_DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          set -eu
+          repo="${GITHUB_REPOSITORY#*/}"
+          target="docker.io/${DOCKERHUB_USERNAME}/${repo,,}"
+          args=()
+          if [ "$TAG_VERSION" = "true" ]; then
+            args+=(--tag "$target:$VERSION")
+          fi
+          if [ "$TAG_LATEST" = "true" ]; then
+            args+=(--tag "$target:latest")
+          fi
+          docker buildx imagetools create "${args[@]}" "$SOURCE_IMAGE@$SOURCE_DIGEST"

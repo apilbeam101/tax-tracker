@@ -53,6 +53,7 @@ jobs:
       tag-latest: true
       tag-version: false
       smoke: true
+    secrets: inherit
 
   # Called with the digest the rebuild just pushed, so the scan always covers the rebuilt image
   # rather than whatever :latest pointed at when an independent cron fired.
