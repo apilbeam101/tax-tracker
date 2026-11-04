@@ -100,8 +100,8 @@ disk, including logs and exports, when the machine is off.
   each platform), the npm package and the installer scripts can all be checked against this
   repository.
 
-To report a vulnerability, use **Report a vulnerability** on this repository's Security tab rather
-than a public issue.
+To report a vulnerability, follow the [security policy](../SECURITY.md): use **Report a
+vulnerability** on this repository's Security tab rather than a public issue.
 
 ## OWASP Top 10 review
 

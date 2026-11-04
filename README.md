@@ -57,13 +57,14 @@ _Populated with dummy data — no real financial information._
 | [Security model](docs/SECURITY_MODEL.md) | What is encrypted, unlock modes, what is not protected |
 | [Upgrading](docs/UPGRADING.md) | Moving to a new version |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Starting with `tax-tracker doctor` |
+| [Contributing](CONTRIBUTING.md) | Setting up, the checks to run, and what to watch for; the [code of conduct](CODE_OF_CONDUCT.md) applies |
 | [Design](DESIGN.md) and [implementation notes](IMPLEMENTATION.md) | How it is built and why |
 
 ---
 
 ## Security
 
-Sensitive fields are encrypted individually in the database file, under a key that your passphrase protects. The app listens on `127.0.0.1` by default and is meant to run on your own machine or network, behind HTTPS if you reach it from elsewhere. The [security model](docs/SECURITY_MODEL.md) describes what is and is not protected, the unlock modes, and an OWASP Top 10 review. To report a vulnerability, use **Report a vulnerability** on this repository's Security tab rather than a public issue.
+Sensitive fields are encrypted individually in the database file, under a key that your passphrase protects. The app listens on `127.0.0.1` by default and is meant to run on your own machine or network, behind HTTPS if you reach it from elsewhere. The [security model](docs/SECURITY_MODEL.md) describes what is and is not protected, the unlock modes, and an OWASP Top 10 review. To report a vulnerability, follow the [security policy](SECURITY.md): use **Report a vulnerability** on this repository's Security tab rather than a public issue.
 
 ---
 

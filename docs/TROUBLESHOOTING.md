@@ -75,6 +75,9 @@ If you have lost both, the encrypted data cannot be recovered.
 
 ## Asking for help
 
-Open an issue with the output of `tax-tracker doctor` and `tax-tracker info`, the version, and how
-you installed it. **Never paste real financial data, passphrases, recovery keys or secrets** into
-an issue: this repository is public.
+Open an issue on the repository and choose the form that fits: *Bug report* (it asks for the output
+of `tax-tracker doctor`, the version and how you installed it), *A tax figure looks wrong* (describe
+a small scenario with made-up figures, and say where you think the right answer comes from), or
+*Feature request*. **Never paste real financial data, passphrases, recovery keys or secrets** into
+an issue: this repository is public. For a security problem, do not open an issue; follow the
+[security policy](../SECURITY.md).

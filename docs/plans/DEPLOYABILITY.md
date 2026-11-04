@@ -367,6 +367,10 @@ Also:
 
 ## Phase 8: Public-repo hygiene
 
+As built: `SECURITY.md` (private reporting through GitHub's "Report a vulnerability" form, which is enabled; what is in scope and what is a design limit, with a pointer to the security model; how to verify downloads; no response-time promises, because there is a single maintainer), `CONTRIBUTING.md` (setup, the four checks, and the project-specific traps: money in `big.js`, rates as data, a worked example for tax logic, append-only migrations, the field registry, `HttpError`), `CODE_OF_CONDUCT.md` (short, written for this project; conduct reports go through the same private form because no public contact address exists), `.github/ISSUE_TEMPLATE/` with forms for a bug (asks for the version, how it was installed and `tax-tracker doctor` output, and opens with the public-repo warning), for "a tax figure looks wrong" (asks for a made-up scenario and the source of the expected answer) and for a feature request, a `config.yml` that disables blank issues and links the security form and the troubleshooting guide, and `.github/pull_request_template.md`. Every form has a required "no real financial data" checkbox. The tax-figure form applies a `tax-calculation` label that does not exist on the repository yet; create it, or the label is simply not applied. `svelte-check` is deliberately not added: it supports TypeScript 5 and 6 only and the project is on 7 (the same gap that ruled out ESLint), so it cannot run until it catches up.
+
+The plan items, kept for reference:
+
 - `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue and PR templates.
 - The bug report template asks for `tax-tracker doctor` output and explicitly warns against pasting real financial data (repo is public).
 - `svelte-check` in CI for the client. This is tracked separately in the dev-tooling-backlog memory; include it here only if time permits.
