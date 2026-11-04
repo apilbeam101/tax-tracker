@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [0.1.0-rc.1] - 2026-11-04
+
 ### Added
 
 - Dark mode: a nav-bar toggle (next to the number-masking toggle) switches the whole UI between light and dark themes via a CSS custom-property token palette (`src/client/src/App.svelte`), including `color-scheme` for native form controls/scrollbars. Preference persists in `localStorage` and defaults to the OS `prefers-color-scheme` on first visit; a small same-origin bootstrap script (`public/theme-init.js`, CSP-safe — no inline script needed) applies it before first paint to avoid a light-theme flash. Canvas-based charts (`BarChart.svelte`, `LineChart.svelte`) resolve theme colors at draw time and redraw automatically when the theme changes.
