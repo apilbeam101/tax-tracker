@@ -35,6 +35,8 @@ function makePriceService(price: Price | null): PriceService {
     getPrice: vi.fn(async () => price),
     fetchRange: vi.fn(async () => []),
     getLatestCached: vi.fn(() => undefined),
+    earliestCachedDate: vi.fn(() => null),
+    listCached: vi.fn(() => []),
   }
 }
 

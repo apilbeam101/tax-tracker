@@ -222,19 +222,21 @@ export const taxRoutes: FastifyPluginAsync = async (app) => {
       quantity: string
       expected_discount_price_native: string | null
     }
-    const scheduleRows = app.db
-      .prepare(`
-        SELECT vs.id, vs.instrument_id, vs.scheduled_date, vs.quantity,
-               vs.expected_discount_price_native
-        FROM vest_schedule vs
-        WHERE vs.tenant_id = ?
-          AND vs.schedule_type = 'espp-purchase'
-          AND vs.expected_discount_price_native IS NOT NULL
-          AND vs.realised_txn_id IS NULL
-          AND vs.scheduled_date >= ?
-          AND vs.scheduled_date <= ?
-      `)
-      .all(user.tenantId, startDate, endDate) as unknown as VestScheduleRow[]
+    const scheduleRows: VestScheduleRow[] = app.vestSchedules
+      .list(user.tenantId, {
+        scheduleType: 'espp-purchase',
+        from: startDate,
+        to: endDate,
+        unrealisedOnly: true,
+      })
+      .filter((s) => s.expectedDiscountPriceNative !== null)
+      .map((s) => ({
+        id: s.id,
+        instrument_id: s.instrumentId,
+        scheduled_date: s.scheduledDate,
+        quantity: s.quantity,
+        expected_discount_price_native: s.expectedDiscountPriceNative,
+      }))
 
     interface ProjectedEsppItem {
       scheduleId: number

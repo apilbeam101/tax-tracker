@@ -1,34 +1,29 @@
 import { join } from 'node:path'
-import fastifyCookie from '@fastify/cookie'
 import fastifyCsrfProtection from '@fastify/csrf-protection'
 import fastifyHelmet from '@fastify/helmet'
 import fastifyRateLimit from '@fastify/rate-limit'
-import fastifySession from '@fastify/session'
 import fastifyStatic from '@fastify/static'
 import type { FastifyInstance } from 'fastify'
-import { config } from './config/env.ts'
+import { config } from './config/current.ts'
+import { packageRoot } from './config/paths.ts'
+import { scrubIfPending } from './crypto/upgrade.ts'
 import { initDb } from './db/database.ts'
 import { errorHandler } from './errors.ts'
-import { createCgtDisposalStore } from './repositories/sqlite/CgtDisposalStore.ts'
-import { createFxRateStore } from './repositories/sqlite/FxRateStore.ts'
-import { createInstrumentStore } from './repositories/sqlite/InstrumentStore.ts'
-import { createPriceStore } from './repositories/sqlite/PriceStore.ts'
-import { createS104PoolStore } from './repositories/sqlite/S104PoolStore.ts'
-import { createTransactionStore } from './repositories/sqlite/TransactionStore.ts'
+import { registerLockState } from './lock.ts'
+import { registerRepositories } from './repositories/register.ts'
 import { apiRoutes } from './routes/api.ts'
 import { authRoutes } from './routes/auth.ts'
 import { healthRoute } from './routes/health.ts'
+import { startBackupSchedule } from './services/backup/scheduler.ts'
 import { createFxService } from './services/fx/index.ts'
 import { createPriceService } from './services/prices/cache.ts'
-import { createTiingoProvider } from './services/prices/tiingo.ts'
+import { createKeyedTiingoProvider } from './services/prices/tiingo.ts'
 import { createYahooProvider } from './services/prices/yahoo.ts'
 import { backfillRealisedProjections, recalcAllInstruments } from './services/tax/recalc.ts'
 import { backfillAutoWithholding } from './services/tax/withholding.ts'
+import { registerSession } from './session.ts'
 
-// Resolve client dist relative to the project root (process.cwd()), not the
-// source file location — avoids __dirname/import.meta.url resolution issues
-// when running via tsx directly vs compiled output.
-const CLIENT_DIST = join(process.cwd(), 'dist', 'client')
+const CLIENT_DIST = join(packageRoot(), 'dist', 'client')
 
 export async function buildApp(app: FastifyInstance): Promise<void> {
   app.setErrorHandler(errorHandler)
@@ -58,17 +53,7 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
   })
 
   // ── Cookies & sessions ──────────────────────────────────────────────────────
-  await app.register(fastifyCookie)
-  await app.register(fastifySession, {
-    secret: config.sessionSecret,
-    cookie: {
-      secure: config.isProduction,
-      httpOnly: true,
-      sameSite: 'lax',
-      maxAge: 8 * 60 * 60 * 1000, // 8h idle timeout
-    },
-    saveUninitialized: false,
-  })
+  await registerSession(app, { secret: config.sessionSecret, secureCookies: config.secureCookies })
 
   // ── CSRF protection ─────────────────────────────────────────────────────────
   await app.register(fastifyCsrfProtection, {
@@ -76,36 +61,80 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
   })
 
   // ── Database ────────────────────────────────────────────────────────────────
-  const db = await initDb(config.dbPath)
+  const db = await initDb(config.dbPath, { encryptionKey: config.encryptionKey })
   app.decorate('db', db)
+  // Closing cleanly folds the write-ahead log into the main file.
+  app.addHook('onClose', async () => {
+    try {
+      db.close()
+    } catch {
+      /* already closed */
+    }
+  })
+
+  app.decorate('runtime', {
+    dataDir: config.dataDir,
+    dbPath: config.dbPath,
+    restoreRestart: config.restoreRestart,
+    unattendedKey: config.encryptionKey,
+    configMode: config.configMode,
+    apiKeysFromEnv: {
+      TIINGO_API_KEY: config.tiingoApiKey,
+      ALPHA_VANTAGE_API_KEY: config.alphaVantageApiKey,
+    },
+  })
+
+  // ── Lock state ───────────────────────────────────────────────────────────────
+  // Created before the stores: they encrypt and decrypt through the keyring.
+  const lockState = registerLockState(app, {
+    db,
+    encryptionKey: config.encryptionKey,
+    // These touch decrypted data, so they run at boot when there is nothing to unlock (or an
+    // unattended key opens it), and otherwise on the first unlock.
+    startupTasks: () => {
+      // Retroactively link any Projections entries that predate automatic
+      // linking to a matching transaction already on file.
+      backfillRealisedProjections(app)
+
+      // Retroactively apply auto-withholding to USD dividend transactions that
+      // predate this feature.
+      backfillAutoWithholding(app)
+
+      // Rebuild S104 pools and disposal records from the transactions. Repairs
+      // pools persisted before the same-day matching order fix, which left
+      // same-day-matched shares sitting in the pool.
+      recalcAllInstruments(app)
+    },
+  })
 
   // ── Repositories & services ──────────────────────────────────────────────────
-  const fxRateStore = createFxRateStore(db)
-  app.decorate('instruments', createInstrumentStore(db))
-  app.decorate('transactions', createTransactionStore(db))
-  app.decorate('cgtDisposals', createCgtDisposalStore(db))
-  app.decorate('s104Pools', createS104PoolStore(db))
-  app.decorate('fx', createFxService(fxRateStore, config.fxRatePolicy))
+  registerRepositories(app, db)
+  app.decorate('fx', createFxService(app.fxRates, config.fxRatePolicy))
 
-  // Retroactively link any Projections entries that predate automatic
-  // linking to a matching transaction already on file.
-  backfillRealisedProjections(app)
-
-  // Retroactively apply auto-withholding to USD dividend transactions that
-  // predate this feature.
-  backfillAutoWithholding(app)
-
-  // Rebuild S104 pools and disposal records from the transactions. Repairs
-  // pools persisted before the same-day matching order fix, which left
-  // same-day-matched shares sitting in the pool.
-  recalcAllInstruments(app)
-
-  const priceStore = createPriceStore(db)
   const priceProviders = [
-    ...(config.tiingoApiKey ? [createTiingoProvider(config.tiingoApiKey)] : []),
+    createKeyedTiingoProvider(() => app.apiKeys.get('TIINGO_API_KEY')),
     createYahooProvider(),
   ]
-  app.decorate('priceService', createPriceService(priceStore, priceProviders))
+  app.decorate('priceService', createPriceService(app.prices, priceProviders))
+
+  await lockState.boot()
+
+  // Copies ciphertext, so it needs no unlock. The first check runs shortly after start.
+  const backups = startBackupSchedule({
+    db,
+    dataDir: config.dataDir,
+    schedule: config.backupSchedule,
+    warn: (message) => app.log.warn(message),
+  })
+  app.addHook('onClose', async () => backups.stop())
+
+  // An upgrade whose clean-up did not finish (disk full, file held open by another program) is
+  // retried here, before any request is served, until it completes.
+  if (scrubIfPending(db) === false) {
+    app.log.warn(
+      'Old unencrypted data may still be in free pages of the database file: the clean-up after encryption did not complete and will be retried at the next start.',
+    )
+  }
 
   // ── Static files (compiled Svelte SPA) ──────────────────────────────────────
   await app.register(fastifyStatic, {
@@ -122,7 +151,7 @@ export async function buildApp(app: FastifyInstance): Promise<void> {
   })
 
   // ── Routes ───────────────────────────────────────────────────────────────────
-  await app.register(healthRoute)
+  await app.register(healthRoute, { commit: config.gitCommit })
   await app.register(authRoutes, { prefix: '/api/auth' })
   await app.register(apiRoutes, { prefix: '/api' })
 }

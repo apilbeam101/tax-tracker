@@ -25,11 +25,10 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { fileURLToPath } from 'node:url'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
+import { resolveDataPaths } from '../src/server/config/paths.ts'
+import { refuseIfEncrypted } from './refuse-encrypted.ts'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,9 +86,10 @@ const raw = JSON.parse(readFileSync(resolve(filePath), 'utf-8')) as GhostfolioEx
 // Build tag-id → tag-name map
 const tagMap = new Map<string, string>(raw.tags.map((t) => [t.id, t.name.trim()]))
 
-const dbPath = process.env.DB_PATH ?? resolve(__dirname, '../data/taxtracker.db')
+const { dbPath } = resolveDataPaths()
 console.log(`Opening database: ${dbPath}`)
 const db = new DatabaseSync(dbPath)
+refuseIfEncrypted(db, 'import-ghostfolio')
 db.exec('PRAGMA foreign_keys = ON')
 
 const TENANT_ID = 1
@@ -130,7 +130,10 @@ const insertAudit = db.prepare(`
   VALUES (?, ?, 'txn.create', 'txn', ?, ?)
 `)
 
-db.exec('BEGIN')
+// Take the write lock first, then re-check: the app may have encrypted the database since this
+// script started, and everything below would then write plaintext into encrypted columns.
+db.exec('BEGIN IMMEDIATE')
+refuseIfEncrypted(db, 'import-ghostfolio')
 try {
   for (const activity of raw.activities) {
     // Resolve tag names for this activity

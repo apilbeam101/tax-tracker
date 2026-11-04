@@ -3,8 +3,23 @@
  * All process.env access flows through here — never scattered across the codebase.
  */
 
+import { isIP } from 'node:net'
+import { homedir } from 'node:os'
+import type { BackupSchedule } from '../services/backup/scheduler.ts'
+import { ensureConfigFile } from './file.ts'
+import { resolveDataPaths } from './paths.ts'
+import { readSecret, validateStrongSecret } from './secrets.ts'
+
 const FX_RATE_POLICIES = ['hmrc-monthly', 'daily-spot'] as const
 type FxRatePolicy = (typeof FX_RATE_POLICIES)[number]
+
+const SECURE_COOKIE_MODES = ['auto', 'true', 'false'] as const
+type SecureCookies = 'auto' | boolean
+
+const BACKUP_SCHEDULES = ['daily', 'off'] as const
+const RESTORE_RESTARTS = ['manual', 'exit'] as const
+
+const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const
 
 function isFxRatePolicy(v: string): v is FxRatePolicy {
   return (FX_RATE_POLICIES as readonly string[]).includes(v)
@@ -12,33 +27,76 @@ function isFxRatePolicy(v: string): v is FxRatePolicy {
 
 function validatePort(raw: string, errors: string[]): number {
   const n = Number(raw)
-  if (!Number.isInteger(n) || n < 1 || n > 65535) {
-    errors.push(`PORT must be an integer between 1 and 65535, got: ${raw}`)
+  if (!Number.isInteger(n) || n < 0 || n > 65535) {
+    errors.push(`PORT must be an integer between 0 and 65535 (0 picks a free port), got: ${raw}`)
     return 3000
   }
   return n
 }
 
+function parseSecureCookies(raw: string, errors: string[]): SecureCookies {
+  if (!(SECURE_COOKIE_MODES as readonly string[]).includes(raw)) {
+    errors.push(`SECURE_COOKIES must be one of ${SECURE_COOKIE_MODES.join(', ')}, got: ${raw}`)
+    return 'auto'
+  }
+  return raw === 'auto' ? 'auto' : raw === 'true'
+}
+
+const TRUST_PROXY_KEYWORDS = ['loopback', 'linklocal', 'uniquelocal']
+
+function isTrustProxyEntry(entry: string): boolean {
+  if (TRUST_PROXY_KEYWORDS.includes(entry)) return true
+  const [addr = '', prefix, ...rest] = entry.split('/')
+  const family = isIP(addr)
+  if (family === 0 || rest.length > 0) return false
+  if (prefix === undefined) return true
+  return /^\d+$/.test(prefix) && Number(prefix) <= (family === 4 ? 32 : 128)
+}
+
+// A numeric hop count is deliberately unsupported: Fastify's typings omit it
+// and at runtime it trusts no proxy at all, which would silently defeat 'auto'.
+function parseTrustProxy(raw: string | undefined, errors: string[]): boolean | string {
+  if (!raw || raw === 'false') return false
+  if (raw === 'true') return true
+  const entries = raw.split(',').map((e) => e.trim())
+  if (!entries.every(isTrustProxyEntry)) {
+    errors.push(
+      `TRUST_PROXY must be true, false, or a comma-separated list of IPs, CIDRs or ${TRUST_PROXY_KEYWORDS.join('/')}, got: ${raw}`,
+    )
+    return false
+  }
+  return raw
+}
+
 // Collects every problem before throwing, rather than failing on the first
 // missing/invalid var — a misconfigured deployment should see the full list
 // in one shot, not fix-and-restart repeatedly to find the next issue.
-export function buildConfig() {
+export function buildConfig(env: NodeJS.ProcessEnv = process.env) {
   const errors: string[] = []
 
-  const host = process.env.HOST ?? '127.0.0.1'
-  const port = validatePort(process.env.PORT ?? '3000', errors)
-  const dbPath = process.env.DB_PATH ?? './data/taxtracker.db'
+  const host = env.HOST ?? '127.0.0.1'
+  const port = validatePort(env.PORT ?? '3000', errors)
+  const {
+    dbPath,
+    dataDir,
+    source: dataDirSource,
+  } = resolveDataPaths({ env, cwd: process.cwd(), platform: process.platform, home: homedir() })
 
-  const sessionSecret = process.env.SESSION_SECRET
-  if (!sessionSecret) errors.push('Missing required environment variable: SESSION_SECRET')
+  const errorsBefore = errors.length
+  const sessionSecret = readSecret('SESSION_SECRET', env, errors)
+  if (sessionSecret) validateStrongSecret('SESSION_SECRET', sessionSecret, errors)
+  else if (errors.length === errorsBefore) {
+    errors.push('Missing required environment variable: SESSION_SECRET')
+  }
 
-  const encryptionKey = process.env.ENCRYPTION_KEY
-  if (!encryptionKey) errors.push('Missing required environment variable: ENCRYPTION_KEY')
+  const encryptionKeyRaw = readSecret('ENCRYPTION_KEY', env, errors)
+  const encryptionKey = encryptionKeyRaw || undefined
+  if (encryptionKey) validateStrongSecret('ENCRYPTION_KEY', encryptionKey, errors)
 
-  const tiingoApiKey = process.env.TIINGO_API_KEY ?? ''
-  const alphaVantageApiKey = process.env.ALPHA_VANTAGE_API_KEY ?? ''
+  const tiingoApiKey = readSecret('TIINGO_API_KEY', env, errors)
+  const alphaVantageApiKey = readSecret('ALPHA_VANTAGE_API_KEY', env, errors)
 
-  const fxRatePolicyRaw = process.env.FX_RATE_POLICY ?? 'hmrc-monthly'
+  const fxRatePolicyRaw = env.FX_RATE_POLICY ?? 'hmrc-monthly'
   if (!isFxRatePolicy(fxRatePolicyRaw)) {
     errors.push(
       `FX_RATE_POLICY must be one of ${FX_RATE_POLICIES.join(', ')}, got: ${fxRatePolicyRaw}`,
@@ -48,6 +106,29 @@ export function buildConfig() {
     ? fxRatePolicyRaw
     : 'hmrc-monthly'
 
+  const secureCookies = parseSecureCookies(env.SECURE_COOKIES || 'auto', errors)
+  const trustProxy = parseTrustProxy(env.TRUST_PROXY, errors)
+
+  const backupScheduleRaw = env.BACKUP_SCHEDULE || (env.AUTO_CONFIG === 'true' ? 'daily' : 'off')
+  if (!(BACKUP_SCHEDULES as readonly string[]).includes(backupScheduleRaw)) {
+    errors.push(
+      `BACKUP_SCHEDULE must be one of ${BACKUP_SCHEDULES.join(', ')}, got: ${backupScheduleRaw}`,
+    )
+  }
+  const backupSchedule: BackupSchedule = backupScheduleRaw === 'daily' ? 'daily' : 'off'
+
+  const restoreRestart = env.RESTORE_RESTART || 'manual'
+  if (!(RESTORE_RESTARTS as readonly string[]).includes(restoreRestart)) {
+    errors.push(
+      `RESTORE_RESTART must be one of ${RESTORE_RESTARTS.join(', ')}, got: ${restoreRestart}`,
+    )
+  }
+
+  const logLevelRaw = env.LOG_LEVEL || 'info'
+  if (!(LOG_LEVELS as readonly string[]).includes(logLevelRaw)) {
+    errors.push(`LOG_LEVEL must be one of ${LOG_LEVELS.join(', ')}, got: ${logLevelRaw}`)
+  }
+
   if (errors.length > 0) {
     throw new Error(`Invalid environment configuration:\n  - ${errors.join('\n  - ')}`)
   }
@@ -56,15 +137,67 @@ export function buildConfig() {
     host,
     port,
     dbPath,
-    sessionSecret: sessionSecret as string,
-    encryptionKey: encryptionKey as string,
+    dataDir,
+    dataDirSource,
+    sessionSecret,
+    encryptionKey,
     tiingoApiKey,
     alphaVantageApiKey,
     fxRatePolicy,
-    isProduction: process.env.NODE_ENV === 'production',
+    secureCookies,
+    trustProxy,
+    backupSchedule,
+    restoreRestart: (restoreRestart === 'exit' ? 'exit' : 'manual') as 'exit' | 'manual',
+    logLevel: logLevelRaw,
+    gitCommit: env.GIT_COMMIT || 'unknown',
   }
 }
 
-export const config = buildConfig()
+export type ConfigMode = 'env-supplied' | 'self-configured'
 
-export type Config = typeof config
+export type LoadedConfig = ReturnType<typeof buildConfig> & {
+  configMode: ConfigMode
+  configFile: string | undefined
+}
+
+function parseAutoConfig(raw: string | undefined): boolean {
+  if (!raw || raw === 'false') return false
+  if (raw === 'true') return true
+  throw new Error(
+    `Invalid environment configuration:\n  - AUTO_CONFIG must be true or false, got: ${raw}`,
+  )
+}
+
+// Env-supplied mode (the default) never touches config.json. Self-configured mode (AUTO_CONFIG=true,
+// which the CLI and installers turn on) keeps a generated SESSION_SECRET and the non-secret
+// settings in <dataDir>/config.json; anything set in the environment still wins over the file.
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): LoadedConfig {
+  if (!parseAutoConfig(env.AUTO_CONFIG)) {
+    return {
+      ...buildConfig(env),
+      configMode: 'env-supplied',
+      configFile: undefined,
+    }
+  }
+
+  const { dataDir } = resolveDataPaths({
+    env,
+    cwd: process.cwd(),
+    platform: process.platform,
+    home: homedir(),
+  })
+  const file = ensureConfigFile(dataDir, {
+    needSessionSecret: !env.SESSION_SECRET && !env.SESSION_SECRET_FILE,
+  })
+  const merged: NodeJS.ProcessEnv = { ...env }
+  for (const [name, value] of Object.entries(file.values)) {
+    if (env[name]) continue
+    if (name === 'SESSION_SECRET' && env.SESSION_SECRET_FILE) continue
+    merged[name] = value
+  }
+  return {
+    ...buildConfig(merged),
+    configMode: 'self-configured',
+    configFile: file.path,
+  }
+}

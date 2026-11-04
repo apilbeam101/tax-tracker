@@ -1,7 +1,6 @@
 import Big from 'big.js'
 import type { FastifyPluginAsync } from 'fastify'
 import type { CreateTransactionBody, UpdateTransactionBody } from '../../shared/types.ts'
-import { config } from '../config/env.ts'
 import type { InstrumentStore, TransactionStore } from '../repositories/index.ts'
 import type { FxService } from '../services/fx/index.ts'
 import {
@@ -324,10 +323,12 @@ export const transactionRoutes: FastifyPluginAsync = async (app) => {
       },
     },
     async (req, reply) => {
-      if (!config.alphaVantageApiKey) {
-        return reply
-          .status(503)
-          .send({ error: 'ALPHA_VANTAGE_API_KEY is not configured on the server.' })
+      const alphaVantageApiKey = app.apiKeys.get('ALPHA_VANTAGE_API_KEY')
+      if (!alphaVantageApiKey) {
+        return reply.status(503).send({
+          error:
+            'No Alpha Vantage API key is configured. Add one under Settings, or set ALPHA_VANTAGE_API_KEY in the server environment.',
+        })
       }
 
       const user = req.session.user!
@@ -337,7 +338,7 @@ export const transactionRoutes: FastifyPluginAsync = async (app) => {
       if (!instrument) return reply.status(404).send({ error: 'Instrument not found' })
 
       // Fetch from Alpha Vantage
-      const url = `https://www.alphavantage.co/query?function=DIVIDENDS&symbol=${encodeURIComponent(instrument.ticker)}&apikey=${config.alphaVantageApiKey}`
+      const url = `https://www.alphavantage.co/query?function=DIVIDENDS&symbol=${encodeURIComponent(instrument.ticker)}&apikey=${alphaVantageApiKey}`
       let avData: { ex_dividend_date: string; payment_date: string; amount: string }[]
       try {
         const resp = await fetch(url)

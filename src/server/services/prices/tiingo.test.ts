@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { createTiingoProvider } from './tiingo.ts'
+import { createKeyedTiingoProvider, createTiingoProvider } from './tiingo.ts'
 
 const FIXTURES = join(import.meta.dirname, '__fixtures__')
 
@@ -87,5 +87,30 @@ describe('Tiingo provider — response parsing (real captured shape, sanitized)'
 
   it('requires an API key at construction time', () => {
     expect(() => createTiingoProvider('')).toThrow('Tiingo API key is required')
+  })
+})
+
+describe('keyed Tiingo provider', () => {
+  it('reports no data, without calling Tiingo, while there is no key', async () => {
+    mockFetchJson(200, loadFixture('tiingo-daily.json'))
+    const provider = createKeyedTiingoProvider(() => undefined)
+
+    expect(await provider.getPrice('ACME', 'USD', '2025-06-02')).toBeNull()
+    expect(await provider.getHistoricalPrices('ACME', 'USD', '2025-06-01', '2025-06-03')).toEqual(
+      [],
+    )
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+
+  it('uses a key that appears after the provider was built', async () => {
+    mockFetchJson(200, loadFixture('tiingo-daily.json'))
+    let key: string | undefined
+    const provider = createKeyedTiingoProvider(() => key)
+
+    expect(await provider.getPrice('ACME', 'USD', '2025-06-02')).toBeNull()
+    key = 'later-key'
+    const result = await provider.getPrice('ACME', 'USD', '2025-06-02')
+    expect(result).toEqual({ priceDate: '2025-06-02', closePrice: '27.75', source: 'tiingo' })
+    expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toContain('later-key')
   })
 })

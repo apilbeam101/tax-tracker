@@ -5,6 +5,8 @@ export class HttpError extends Error {
   constructor(
     public readonly statusCode: number,
     message: string,
+    // Stable machine-readable identifier, for clients that must react to one specific condition.
+    public readonly code?: string,
   ) {
     super(message)
     this.name = this.constructor.name
@@ -12,8 +14,8 @@ export class HttpError extends Error {
 }
 
 export class BadRequestError extends HttpError {
-  constructor(message: string) {
-    super(400, message)
+  constructor(message: string, code?: string) {
+    super(400, message, code)
   }
 }
 
@@ -30,8 +32,17 @@ export class NotFoundError extends HttpError {
 }
 
 export class ConflictError extends HttpError {
-  constructor(message: string) {
-    super(409, message)
+  constructor(message: string, code?: string) {
+    super(409, message, code)
+  }
+}
+
+export const LOCKED_CODE = 'LOCKED'
+export const LOCKED_MESSAGE = 'Locked: sign in to unlock your data'
+
+export class LockedError extends HttpError {
+  constructor(message = LOCKED_MESSAGE, code = LOCKED_CODE) {
+    super(423, message, code)
   }
 }
 
@@ -39,8 +50,8 @@ export class ConflictError extends HttpError {
 // code was already inconsistent about which key it reads (some client code
 // reads response.message, some reads response.error), and this handler
 // shouldn't have to know which.
-function sendError(reply: FastifyReply, statusCode: number, message: string): void {
-  reply.status(statusCode).send({ error: message, message })
+function sendError(reply: FastifyReply, statusCode: number, message: string, code?: string): void {
+  reply.status(statusCode).send({ error: message, message, ...(code ? { code } : {}) })
 }
 
 /**
@@ -60,7 +71,7 @@ export function errorHandler(
 ): void {
   if (error instanceof HttpError) {
     request.log.warn({ err: error }, error.message)
-    sendError(reply, error.statusCode, error.message)
+    sendError(reply, error.statusCode, error.message, error.code)
     return
   }
 

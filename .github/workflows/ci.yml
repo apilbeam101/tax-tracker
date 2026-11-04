@@ -31,6 +31,92 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: npm run pack:check
+      - run: npm run changelog:check
+
+  # The image builds for every platform that gets published, and the native argon2 binary that
+  # lands in each is the one for that platform. Only amd64 can run on the runner, so that image is
+  # started and probed; the arm64 image is built (and its dependencies installed) under emulation.
+  docker:
+    name: image build (amd64, arm64) and smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: build for every published platform (no push)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            IMAGE_VERSION=0.0.0-ci
+
+      - name: build the amd64 image for local use
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: tax-tracker:ci
+
+      - name: image hygiene (no secrets, data or sources in the layers)
+        run: |
+          set -eu
+          docker run --rm --entrypoint sh tax-tracker:ci -c '
+            set -eu
+            for p in /app/.env /app/data/taxtracker.db /app/src /app/.git /app/scripts; do
+              if [ -e "$p" ]; then echo "unexpected $p in the image" >&2; exit 1; fi
+            done
+            test -f /app/dist/server/cli.js
+            test -f /app/dist/client/index.html
+            test -x /usr/local/bin/tax-tracker
+            [ "$(id -u)" = "10001" ]
+          '
+
+      - name: start the image and probe /health
+        run: |
+          set -eu
+          secret=$(openssl rand -hex 32)
+          docker run -d --name tt --init -p 127.0.0.1:3000:3000 \
+            -e HOST=0.0.0.0 -e SESSION_SECRET="$secret" tax-tracker:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/health; then echo; exit 0; fi
+            sleep 1
+          done
+          docker logs tt >&2
+          exit 1
+
+      - name: one-off CLI command in the same image
+        run: docker run --rm tax-tracker:ci --version
+
+  # argon2 is a native addon, so the published package has to be proven on each OS: pack it,
+  # install the tarball into an empty directory, start it and probe /health.
+  package:
+    name: package smoke test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run pack:smoke
+      - name: package smoke test installed with npm 12
+        run: npm run pack:smoke
+        env:
+          SMOKE_NPM_VERSION: "12"
 
   audit:
     name: npm audit (prod deps)

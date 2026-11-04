@@ -568,8 +568,8 @@ exports are lossless (no data is dropped in translation).
 | Dependency auditing | `npm audit --omit=dev --audit-level=high` in CI; Dependabot opens grouped update PRs monthly. |
 
 **Important for self-hosters:** if you expose the service on a public IP or domain, you
-**must** use HTTPS (set `NODE_ENV=production` and front with a reverse proxy such as
-Caddy or nginx with TLS). The app itself defaults to localhost-only to avoid accidental
+**must** use HTTPS (set `TRUST_PROXY` and front with a reverse proxy such as
+Caddy or nginx with TLS, so session cookies are marked `Secure`). The app itself defaults to localhost-only to avoid accidental
 public exposure.
 
 ---

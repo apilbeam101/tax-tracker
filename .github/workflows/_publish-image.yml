@@ -1,0 +1,259 @@
+name: Publish image
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build from
+        required: true
+        type: string
+      version:
+        description: Image version tag (no leading v), e.g. 1.2.0
+        required: true
+        type: string
+      tag-latest:
+        description: Also push a :latest tag
+        required: false
+        type: boolean
+        default: true
+      tag-version:
+        description: Push the exact version tag. The monthly rebuild sets this false, so a pinned version never changes underneath its users.
+        required: false
+        type: boolean
+        default: true
+      smoke:
+        description: Build and run an amd64 image before pushing, and fail without pushing if it does not report the expected version and commit. The monthly rebuild sets this, since the floating node base can move a Node minor between rebuilds.
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      image:
+        description: Image name on GHCR, without a tag or digest
+        value: ${{ jobs.build.outputs.image }}
+      digest:
+        description: Digest of the multi-arch manifest pushed to GHCR
+        value: ${{ jobs.build.outputs.digest }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+      digest: ${{ steps.build.outputs.digest }}
+      platforms: ${{ steps.platforms.outputs.platforms }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: resolve image name and commit
+        id: image
+        run: |
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          # Not github.sha: in a workflow_call the github context is always the caller's, which for
+          # rebuild.yml's schedule trigger is the default branch tip, not the tagged commit checked
+          # out above.
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: compute tags
+        id: tags
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          VERSION: ${{ inputs.version }}
+          TAG_LATEST: ${{ inputs.tag-latest }}
+          TAG_VERSION: ${{ inputs.tag-version }}
+        run: |
+          {
+            echo "tags<<EOF"
+            if [ "$TAG_VERSION" = "true" ]; then
+              echo "$IMAGE:$VERSION"
+            fi
+            if [ "$TAG_LATEST" = "true" ]; then
+              echo "$IMAGE:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # amd64 only: loading into the local daemon needs a single platform, and arm64 would run
+      # under QEMU anyway.
+      - name: build smoke-test image (amd64, not pushed)
+        if: inputs.smoke
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: tax-tracker:smoke
+          build-args: |
+            GIT_COMMIT=${{ steps.image.outputs.commit }}
+            IMAGE_VERSION=${{ inputs.version }}
+
+      - name: smoke-test the image before pushing
+        if: inputs.smoke
+        env:
+          EXPECTED_VERSION: ${{ inputs.version }}
+          EXPECTED_COMMIT: ${{ steps.image.outputs.commit }}
+        run: |
+          set -eu
+          actual=$(docker run --rm tax-tracker:smoke --version)
+          if [ "$actual" != "$EXPECTED_VERSION" ]; then
+            echo "image reports version '$actual', expected '$EXPECTED_VERSION'" >&2
+            exit 1
+          fi
+          commit=$(docker run --rm --entrypoint node tax-tracker:smoke -p 'process.env.GIT_COMMIT')
+          if [ "$commit" != "$EXPECTED_COMMIT" ]; then
+            echo "image reports commit '$commit', expected '$EXPECTED_COMMIT'" >&2
+            exit 1
+          fi
+          echo "built $EXPECTED_VERSION ($EXPECTED_COMMIT) on Node $(docker run --rm --entrypoint node tax-tracker:smoke -p process.version)"
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # arm64 covers Raspberry Pi and Apple-silicon NAS boxes. The production dependencies are
+      # installed per target platform inside the Dockerfile (argon2 is a native addon).
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: build
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          pull: true
+          build-args: |
+            GIT_COMMIT=${{ steps.image.outputs.commit }}
+            IMAGE_VERSION=${{ inputs.version }}
+          tags: ${{ steps.tags.outputs.tags }}
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: resolve per-platform digests
+        id: platforms
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -eu
+          docker buildx imagetools inspect "$IMAGE@$DIGEST" --raw > manifest-index.json
+          # Assigned to a variable first, not echoed straight from the command substitution:
+          # `set -e` does not see a failure inside $(...) when the enclosing simple command is
+          # `echo`, which always succeeds, so a crashed script would silently produce an empty
+          # `platforms=` instead of failing this step.
+          platforms=$(node --experimental-strip-types scripts/resolve-image-platforms.ts manifest-index.json)
+          echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
+
+  # A separate job (not more steps in `build`) because an SPDX SBOM describes one platform's actual
+  # package contents, not the multi-arch index as a whole: `anchore/sbom-action` given the index
+  # digest silently resolves it to the runner's own platform, which would attest an amd64-only SBOM
+  # against a digest that also covers arm64.
+  sbom:
+    name: Attest per-platform SBOM (${{ matrix.entry.platform }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        entry: ${{ fromJSON(needs.build.outputs.platforms) }}
+    steps:
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ needs.build.outputs.image }}@${{ matrix.entry.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          # The registry attestation pushed below is the real deliverable. Both default to "true"
+          # and both default names collide across matrix cells: the workflow-artifact upload, and
+          # (on a tag push, since a workflow_call's github context is the caller's) attaching
+          # sbom.spdx.json to the matching GitHub Release as an asset.
+          upload-artifact: false
+          upload-release-assets: false
+
+      - uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ needs.build.outputs.image }}
+          subject-digest: ${{ matrix.entry.digest }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
+
+  # Best-effort: `imagetools create` copies the index, its image layers and buildx's own in-index
+  # provenance, but not the separate OCI referrer manifests that actions/attest-build-provenance and
+  # actions/attest-sbom push above, which is what `gh attestation verify` checks. GHCR remains the
+  # attested source of truth; Docker Hub is a compatibility mirror. Needs the DOCKERHUB_USERNAME and
+  # DOCKERHUB_TOKEN secrets, passed down by the caller with `secrets: inherit`.
+  mirror-dockerhub:
+    name: Mirror to Docker Hub
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: mirror multi-arch manifest to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          VERSION: ${{ inputs.version }}
+          TAG_LATEST: ${{ inputs.tag-latest }}
+          TAG_VERSION: ${{ inputs.tag-version }}
+          SOURCE_IMAGE: ${{ needs.build.outputs.image }}
+          SOURCE_DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          set -eu
+          repo="${GITHUB_REPOSITORY#*/}"
+          target="docker.io/${DOCKERHUB_USERNAME}/${repo,,}"
+          args=()
+          if [ "$TAG_VERSION" = "true" ]; then
+            args+=(--tag "$target:$VERSION")
+          fi
+          if [ "$TAG_LATEST" = "true" ]; then
+            args+=(--tag "$target:latest")
+          fi
+          docker buildx imagetools create "${args[@]}" "$SOURCE_IMAGE@$SOURCE_DIGEST"

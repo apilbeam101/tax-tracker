@@ -1,6 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "include": ["src/server/**/*", "src/shared/**/*"],
+  "exclude": ["node_modules", "dist", "src/client", "**/*.test.ts", "src/server/test-harness.ts"],
   "compilerOptions": {
     "noEmit": false,
     "rewriteRelativeImportExtensions": true,

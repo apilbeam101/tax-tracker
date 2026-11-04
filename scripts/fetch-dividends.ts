@@ -20,16 +20,15 @@
  *   4. Skips records where a DIV_PAY already exists within ±3 days of the payment date.
  *   5. Dry-run: prints a table of proposed rows. With --commit: inserts them.
  *
- * After committing, run backfill-fx.ts to populate GBP fields, then POST /api/tax/run.
+ * After committing, run `tax-tracker backfill-fx` to populate GBP fields, then POST /api/tax/run.
  *
  * Requires ALPHA_VANTAGE_API_KEY in .env.
  */
 
-import { dirname, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { fileURLToPath } from 'node:url'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
+import { resolveDataPaths } from '../src/server/config/paths.ts'
+import { readSecret } from '../src/server/config/secrets.ts'
+import { refuseIfEncrypted } from './refuse-encrypted.ts'
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
@@ -43,7 +42,12 @@ const commit = args.includes('--commit')
 const fromIdx = args.indexOf('--from')
 const fromDate: string | null = fromIdx !== -1 ? (args[fromIdx + 1] ?? null) : null
 
-const apiKey = process.env.ALPHA_VANTAGE_API_KEY
+const keyErrors: string[] = []
+const apiKey = readSecret('ALPHA_VANTAGE_API_KEY', process.env, keyErrors)
+if (keyErrors.length > 0) {
+  console.error(keyErrors.join('\n'))
+  process.exit(1)
+}
 if (!apiKey) {
   console.error('ALPHA_VANTAGE_API_KEY is not set in .env')
   process.exit(1)
@@ -51,8 +55,8 @@ if (!apiKey) {
 
 // ── DB setup ──────────────────────────────────────────────────────────────────
 
-const DB_PATH = process.env.DB_PATH ?? resolve(__dirname, '../data/taxtracker.db')
-const db = new DatabaseSync(DB_PATH)
+const db = new DatabaseSync(resolveDataPaths().dbPath)
+refuseIfEncrypted(db, 'fetch-dividends')
 db.exec('PRAGMA foreign_keys = ON')
 
 const TENANT_ID = 1
@@ -287,7 +291,10 @@ const insertAudit = db.prepare(`
   VALUES (?, ?, 'txn.create', 'txn', ?, ?)
 `)
 
-db.exec('BEGIN')
+// Take the write lock first, then re-check: the app may have encrypted the database since this
+// script started, and everything below would then write plaintext into encrypted columns.
+db.exec('BEGIN IMMEDIATE')
+refuseIfEncrypted(db, 'fetch-dividends')
 let inserted = 0
 try {
   for (const r of toInsert) {
@@ -332,5 +339,5 @@ try {
 console.log(`\nInserted ${inserted} DIV_PAY rows.`)
 console.log('\nNext steps:')
 console.log('  1. Review estimated payment dates (marked ⚠) in the Transactions UI')
-console.log('  2. Run backfill-fx.ts to populate GBP fields')
+console.log('  2. Run `tax-tracker backfill-fx` to populate GBP fields')
 console.log('  3. POST /api/tax/run to recompute disposals and dividend tax')

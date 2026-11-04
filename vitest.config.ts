@@ -6,8 +6,8 @@ export default defineConfig({
     environment: 'node',
     // Provide stub values for required env vars so tests run without a .env file
     env: {
-      SESSION_SECRET: 'test-session-secret-for-unit-tests-only',
-      ENCRYPTION_KEY: 'test-encryption-key-for-unit-tests-only',
+      SESSION_SECRET: 'test-session-secret-for-unit-tests-only-0123456789',
+      ENCRYPTION_KEY: 'test-encryption-key-for-unit-tests-only-0123456789',
     },
     coverage: {
       provider: 'v8',

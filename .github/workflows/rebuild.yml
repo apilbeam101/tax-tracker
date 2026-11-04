@@ -1,0 +1,69 @@
+name: Monthly base-image rebuild
+
+on:
+  schedule:
+    - cron: "0 6 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve latest release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      exists: ${{ steps.latest.outputs.exists }}
+      tag: ${{ steps.latest.outputs.tag }}
+      version: ${{ steps.latest.outputs.version }}
+    steps:
+      - id: latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          tag=$(gh release list --repo "$REPO" --exclude-drafts --exclude-pre-releases \
+            --limit 1 --json tagName --jq '.[0].tagName // empty')
+          if [ -z "$tag" ]; then
+            echo "no non-draft, non-prerelease release has been published yet: nothing to rebuild"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+  rebuild:
+    name: Rebuild and re-attest image
+    needs: resolve
+    if: needs.resolve.outputs.exists == 'true'
+    uses: ./.github/workflows/_publish-image.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    with:
+      ref: ${{ needs.resolve.outputs.tag }}
+      version: ${{ needs.resolve.outputs.version }}
+      # Only the moving tag: a release's exact version tag is never overwritten, so anyone pinned
+      # to it keeps the image they reviewed.
+      tag-latest: true
+      tag-version: false
+      smoke: true
+    secrets: inherit
+
+  # Called with the digest the rebuild just pushed, so the scan always covers the rebuilt image
+  # rather than whatever :latest pointed at when an independent cron fired.
+  scan:
+    name: Scan rebuilt image
+    needs: rebuild
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    uses: ./.github/workflows/scan.yml
+    with:
+      image-ref: ${{ needs.rebuild.outputs.image }}@${{ needs.rebuild.outputs.digest }}

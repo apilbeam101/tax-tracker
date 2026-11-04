@@ -22,6 +22,8 @@ function makeStore(cached?: Price): PriceStore & { upserted: Price[] } {
     upserted,
     get: vi.fn((_, __) => cached),
     getLatest: vi.fn((id) => upserted.filter((p) => p.instrumentId === id).at(-1) ?? cached),
+    earliestDate: vi.fn(() => null),
+    listRange: vi.fn(() => []),
     upsert: vi.fn((p) => {
       const price = makePrice({ ...p })
       upserted.push(price)

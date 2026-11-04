@@ -1,9 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { apiFetch } from '../lib/api.ts'
+  import Backups from './Backups.svelte'
 
-  type Tab = 'import' | 'export'
-  let tab: Tab = $state('import')
+  type Tab = 'import' | 'export' | 'backups'
+  let { startTab = 'import', oncopies }: { startTab?: Tab; oncopies?: (count: number) => void } = $props()
+  // svelte-ignore state_referenced_locally
+  let tab: Tab = $state(startTab)
 
   // ── Instruments ─────────────────────────────────────────────────────────────
   interface Instrument { id: number; ticker: string; currency: string }
@@ -186,7 +189,12 @@
   <div class="tabs">
     <button class:active={tab === 'import'} onclick={() => tab = 'import'}>Import CSV</button>
     <button class:active={tab === 'export'} onclick={() => tab = 'export'}>Export</button>
+    <button class:active={tab === 'backups'} onclick={() => tab = 'backups'}>Backups &amp; archive</button>
   </div>
+
+  {#if tab === 'backups'}
+    <Backups {oncopies} />
+  {/if}
 
   <!-- ── Import ──────────────────────────────────────────────────────────────── -->
   {#if tab === 'import'}

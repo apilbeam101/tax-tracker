@@ -1,8 +1,20 @@
 # syntax=docker/dockerfile:1
 
-# Builder: compiles the Svelte SPA and the TypeScript server. Nothing from
-# this stage ships in the runtime image.
-FROM node:24 AS builder
+# Production dependencies, installed for the TARGET platform. @node-rs/argon2 is a native addon
+# that ships one prebuilt binary per platform as an optional dependency, and npm chooses it at
+# install time, so this stage must run on (or emulate) the platform being built. Copying
+# node_modules across from a build-host stage would put the wrong binary in the arm64 image.
+FROM node:26-slim AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+# Fails the build, for this platform, if the argon2 prebuilt for it is missing or does not load.
+# Without it an arm64 image built under emulation would pass and only break for its users.
+RUN node -e "require('@node-rs/argon2')"
+
+# Builder: compiles the Svelte SPA and the TypeScript server. The output is architecture-independent
+# JavaScript, so it runs on the build host's own platform and nothing from it ships except dist/.
+FROM --platform=$BUILDPLATFORM node:26 AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -13,13 +25,38 @@ COPY . .
 RUN npm run build
 
 # Runtime: dist/ and production dependencies only. No compiler, no source, no devDeps.
-FROM node:24-slim AS runtime
+FROM node:26-slim AS runtime
 WORKDIR /app
-ENV NODE_ENV=production
 
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+# AUTO_CONFIG=false keeps containers in env-supplied mode (secrets come from the environment or
+# *_FILE paths, the app never writes configuration); the CLI that is now the entrypoint would
+# otherwise default to self-configured mode. Set AUTO_CONFIG=true to opt in.
+ENV NODE_ENV=production \
+    AUTO_CONFIG=false
+# The OS-default data directory ($HOME/.local/share) doesn't exist for the
+# service user, so a bare `docker run -v vol:/app/data` must be pointed here.
+ENV DATA_DIR=/app/data
+ENV LOG_LEVEL=warn
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json ./
 COPY --from=builder /app/dist ./dist
+
+# `docker compose exec tax-tracker tax-tracker backup` and friends.
+RUN chmod +x /app/dist/server/cli.js && ln -s /app/dist/server/cli.js /usr/local/bin/tax-tracker
+
+# The build arguments come last, after the layers above, so a new commit or version does not
+# invalidate them.
+ARG GIT_COMMIT=unknown
+ARG IMAGE_VERSION=0.0.0
+ENV GIT_COMMIT=${GIT_COMMIT} \
+    IMAGE_VERSION=${IMAGE_VERSION}
+LABEL org.opencontainers.image.title="tax-tracker" \
+      org.opencontainers.image.description="Self-hosted UK tax tracker for share purchases, dividends and disposals" \
+      org.opencontainers.image.source="https://github.com/apilbeam101/tax-tracker" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
+      org.opencontainers.image.revision="${GIT_COMMIT}"
 
 # Fixed non-zero UID/GID (not the image's default `node` user) so it's
 # predictable for volume permissions. Owns /app/data up front -- this only
@@ -56,4 +93,8 @@ req.on('error',()=>process.exit(1));\
 # Run this with an init process in front (deploy/docker-compose.yml sets
 # `init: true`, or use `docker run --init`) so SIGTERM is forwarded to node
 # as a non-PID-1 process, where the normal default disposition applies.
-ENTRYPOINT ["node", "dist/server/main.js"]
+#
+# The CLI is the entrypoint and `start` its default command, so one-off commands run in the same
+# image: `docker compose run --rm tax-tracker restore <file> --yes`, `... backup`, `... info`.
+ENTRYPOINT ["node", "/app/dist/server/cli.js"]
+CMD ["start"]

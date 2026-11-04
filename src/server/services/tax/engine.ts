@@ -9,7 +9,7 @@
  * previously persisted disposal records and pool states for each instrument.
  *
  * Inputs must have unitPriceGbp populated on all price-carrying transactions.
- * Run scripts/backfill-fx.ts first if importing from Ghostfolio or other
+ * Run `tax-tracker backfill-fx` first if importing from Ghostfolio or other
  * sources that don't include GBP values.
  */
 

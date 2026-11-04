@@ -17,10 +17,15 @@ const ARGON2_OPTIONS = {
 export const DUMMY_HASH =
   '$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHRzb21lc2FsdA$zvFQmBvqPFbsnlB0BVFV8DTDO7fPlv6CKjdL+qLVq3c'
 
+// New hashes use NFKC, the same normalisation as the passphrase-derived key, so one typed string
+// means the same thing to both. Older hashes were made from the raw string, so verification
+// accepts either form.
 export async function hashPassword(plaintext: string): Promise<string> {
-  return hash(plaintext, ARGON2_OPTIONS)
+  return hash(plaintext.normalize('NFKC'), ARGON2_OPTIONS)
 }
 
 export async function verifyPassword(hashStr: string, plaintext: string): Promise<boolean> {
-  return verify(hashStr, plaintext, ARGON2_OPTIONS)
+  if (await verify(hashStr, plaintext, ARGON2_OPTIONS)) return true
+  const normalised = plaintext.normalize('NFKC')
+  return normalised !== plaintext && verify(hashStr, normalised, ARGON2_OPTIONS)
 }

@@ -4,9 +4,13 @@ import type {
   Transaction,
   TransactionType,
 } from '../../../shared/types.ts'
+import type { FieldCipher } from '../../crypto/fields.ts'
 import type { Db } from '../../db/database.ts'
 import { BadRequestError } from '../../errors.ts'
 import type { TransactionStore } from '../index.ts'
+import { type ColumnValues, createRowCodec, insertRow, updateRow, writeAudit } from './rowcodec.ts'
+
+const TABLE = 'txn'
 
 interface TxnRow {
   id: number
@@ -86,7 +90,45 @@ function validateDecimal(value: string, field: string): void {
   }
 }
 
-export function createTransactionStore(db: Db): TransactionStore {
+// Fields an update may change, with their columns. `required` ones cannot be cleared to null: a
+// missing value keeps the existing one. The rest are nullable, where `undefined` means "leave
+// as is" and `null` means "clear".
+const UPDATABLE: ReadonlyArray<{
+  field: keyof Transaction
+  column: string
+  required?: true
+}> = [
+  { field: 'txnType', column: 'txn_type', required: true },
+  { field: 'txnDate', column: 'txn_date', required: true },
+  { field: 'quantity', column: 'quantity', required: true },
+  { field: 'unitPriceNative', column: 'unit_price_native' },
+  { field: 'nativeCurrency', column: 'native_currency' },
+  { field: 'fxRate', column: 'fx_rate' },
+  { field: 'fxRateType', column: 'fx_rate_type' },
+  { field: 'fxRateSource', column: 'fx_rate_source' },
+  { field: 'unitPriceGbp', column: 'unit_price_gbp' },
+  { field: 'totalGbp', column: 'total_gbp' },
+  { field: 'netGbp', column: 'net_gbp' },
+  { field: 'costsGbp', column: 'costs_gbp', required: true },
+  { field: 'incomeAmountGbp', column: 'income_amount_gbp' },
+  { field: 'esppDiscountPriceNative', column: 'espp_discount_price_native' },
+  { field: 'esppDiscountPriceGbp', column: 'espp_discount_price_gbp' },
+  { field: 'rsuGrossSharesVested', column: 'rsu_gross_shares_vested' },
+  { field: 'rsuSharesWithheld', column: 'rsu_shares_withheld' },
+  { field: 'rsuWithholdingRate', column: 'rsu_withholding_rate' },
+  { field: 'rsuWithholdingMethod', column: 'rsu_withholding_method' },
+  { field: 'dividendGrossGbp', column: 'dividend_gross_gbp' },
+  { field: 'dividendWithholdingGbp', column: 'dividend_withholding_gbp' },
+  { field: 'dividendNetGbp', column: 'dividend_net_gbp' },
+  { field: 'splitRatio', column: 'split_ratio' },
+  { field: 'capreturnsPerShareGbp', column: 'capreturn_per_share_gbp' },
+  { field: 'notes', column: 'notes' },
+]
+
+export function createTransactionStore(db: Db, cipher: FieldCipher): TransactionStore {
+  const codec = createRowCodec(cipher, TABLE)
+  const read = (row: TxnRow) => toTransaction(codec.open(row))
+
   return {
     list(tenantId, opts = {}) {
       let sql = 'SELECT * FROM txn WHERE tenant_id = ?'
@@ -104,14 +146,14 @@ export function createTransactionStore(db: Db): TransactionStore {
         params.push(opts.to)
       }
       sql += ' ORDER BY txn_date, id'
-      return (db.prepare(sql).all(...params) as unknown as TxnRow[]).map(toTransaction)
+      return (db.prepare(sql).all(...params) as unknown as TxnRow[]).map(read)
     },
 
     getById(tenantId, id) {
       const row = db
         .prepare('SELECT * FROM txn WHERE tenant_id = ? AND id = ?')
         .get(tenantId, id) as TxnRow | undefined
-      return row ? toTransaction(row) : undefined
+      return row ? read(row) : undefined
     },
 
     create(tenantId, body, userId) {
@@ -119,53 +161,43 @@ export function createTransactionStore(db: Db): TransactionStore {
       if (body.unitPriceNative) validateDecimal(body.unitPriceNative, 'unitPriceNative')
       if (body.costsGbp) validateDecimal(body.costsGbp, 'costsGbp')
 
-      const result = db
-        .prepare(`
-        INSERT INTO txn (
-          tenant_id, instrument_id, txn_type, txn_date, quantity,
-          unit_price_native, native_currency,
-          fx_rate, fx_rate_type, fx_rate_source,
-          costs_gbp,
-          income_amount_gbp,
-          espp_discount_price_native, espp_discount_price_gbp,
-          rsu_gross_shares_vested, rsu_shares_withheld, rsu_withholding_rate, rsu_withholding_method,
-          dividend_gross_gbp, dividend_withholding_gbp, dividend_net_gbp,
-          split_ratio, capreturn_per_share_gbp,
-          notes
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      `)
-        .run(
-          tenantId,
-          body.instrumentId,
-          body.txnType,
-          body.txnDate,
-          body.quantity,
-          body.unitPriceNative ?? null,
-          body.nativeCurrency ?? null,
-          body.fxRate ?? null,
-          body.fxRateType ?? null,
-          null, // fx_rate_source set by FxService after creation
-          body.costsGbp ?? '0',
-          body.incomeAmountGbp ?? null,
-          body.esppDiscountPriceNative ?? null,
-          null, // espp_discount_price_gbp derived by server after FX
-          body.rsuGrossSharesVested ?? null,
-          body.rsuSharesWithheld ?? null,
-          body.rsuWithholdingRate ?? null,
-          body.rsuWithholdingMethod ?? null,
-          body.dividendGrossGbp ?? null,
-          body.dividendWithholdingGbp ?? null,
-          body.dividendNetGbp ?? null,
-          body.splitRatio ?? null,
-          body.capreturnsPerShareGbp ?? null,
-          body.notes ?? null,
-        )
-      const id = Number(result.lastInsertRowid)
+      const id = insertRow(db, codec, TABLE, {
+        tenant_id: tenantId,
+        instrument_id: body.instrumentId,
+        txn_type: body.txnType,
+        txn_date: body.txnDate,
+        quantity: body.quantity,
+        unit_price_native: body.unitPriceNative ?? null,
+        native_currency: body.nativeCurrency ?? null,
+        fx_rate: body.fxRate ?? null,
+        fx_rate_type: body.fxRateType ?? null,
+        // fx_rate_source is set by FxService after creation
+        fx_rate_source: null,
+        costs_gbp: body.costsGbp ?? '0',
+        income_amount_gbp: body.incomeAmountGbp ?? null,
+        espp_discount_price_native: body.esppDiscountPriceNative ?? null,
+        // espp_discount_price_gbp is derived by the server after FX
+        espp_discount_price_gbp: null,
+        rsu_gross_shares_vested: body.rsuGrossSharesVested ?? null,
+        rsu_shares_withheld: body.rsuSharesWithheld ?? null,
+        rsu_withholding_rate: body.rsuWithholdingRate ?? null,
+        rsu_withholding_method: body.rsuWithholdingMethod ?? null,
+        dividend_gross_gbp: body.dividendGrossGbp ?? null,
+        dividend_withholding_gbp: body.dividendWithholdingGbp ?? null,
+        dividend_net_gbp: body.dividendNetGbp ?? null,
+        split_ratio: body.splitRatio ?? null,
+        capreturn_per_share_gbp: body.capreturnsPerShareGbp ?? null,
+        notes: body.notes ?? null,
+      })
 
-      db.prepare(`
-        INSERT INTO audit_log (tenant_id, user_id, action, entity_type, entity_id, new_data)
-        VALUES (?, ?, 'txn.create', 'txn', ?, ?)
-      `).run(tenantId, userId, id, JSON.stringify(body))
+      writeAudit(db, cipher, {
+        tenantId,
+        userId,
+        action: 'txn.create',
+        entityType: 'txn',
+        entityId: id,
+        newData: body,
+      })
 
       return this.getById(tenantId, id)!
     },
@@ -179,79 +211,36 @@ export function createTransactionStore(db: Db): TransactionStore {
       if (body.costsGbp) validateDecimal(body.costsGbp, 'costsGbp')
 
       const old = { ...existing }
+      const patch = body as Partial<Record<keyof Transaction, unknown>>
+      const current = existing as unknown as Record<keyof Transaction, unknown>
 
-      db.prepare(`
-        UPDATE txn SET
-          txn_type = ?, txn_date = ?, quantity = ?,
-          unit_price_native = ?, native_currency = ?,
-          fx_rate = ?, fx_rate_type = ?, fx_rate_source = ?,
-          unit_price_gbp = ?, total_gbp = ?, net_gbp = ?,
-          costs_gbp = ?,
-          income_amount_gbp = ?,
-          espp_discount_price_native = ?, espp_discount_price_gbp = ?,
-          rsu_gross_shares_vested = ?, rsu_shares_withheld = ?,
-          rsu_withholding_rate = ?, rsu_withholding_method = ?,
-          dividend_gross_gbp = ?, dividend_withholding_gbp = ?, dividend_net_gbp = ?,
-          split_ratio = ?, capreturn_per_share_gbp = ?,
-          notes = ?,
-          updated_at = datetime('now')
-        WHERE tenant_id = ? AND id = ?
-      `).run(
-        body.txnType ?? existing.txnType,
-        body.txnDate ?? existing.txnDate,
-        body.quantity ?? existing.quantity,
-        body.unitPriceNative !== undefined
-          ? (body.unitPriceNative ?? null)
-          : existing.unitPriceNative,
-        body.nativeCurrency !== undefined ? (body.nativeCurrency ?? null) : existing.nativeCurrency,
-        body.fxRate !== undefined ? (body.fxRate ?? null) : existing.fxRate,
-        body.fxRateType !== undefined ? (body.fxRateType ?? null) : existing.fxRateType,
-        body.fxRateSource !== undefined ? (body.fxRateSource ?? null) : existing.fxRateSource,
-        body.unitPriceGbp !== undefined ? (body.unitPriceGbp ?? null) : existing.unitPriceGbp,
-        body.totalGbp !== undefined ? (body.totalGbp ?? null) : existing.totalGbp,
-        body.netGbp !== undefined ? (body.netGbp ?? null) : existing.netGbp,
-        body.costsGbp ?? existing.costsGbp,
-        body.incomeAmountGbp !== undefined
-          ? (body.incomeAmountGbp ?? null)
-          : existing.incomeAmountGbp,
-        body.esppDiscountPriceNative !== undefined
-          ? (body.esppDiscountPriceNative ?? null)
-          : existing.esppDiscountPriceNative,
-        body.esppDiscountPriceGbp !== undefined
-          ? (body.esppDiscountPriceGbp ?? null)
-          : existing.esppDiscountPriceGbp,
-        body.rsuGrossSharesVested !== undefined
-          ? (body.rsuGrossSharesVested ?? null)
-          : existing.rsuGrossSharesVested,
-        body.rsuSharesWithheld !== undefined
-          ? (body.rsuSharesWithheld ?? null)
-          : existing.rsuSharesWithheld,
-        body.rsuWithholdingRate !== undefined
-          ? (body.rsuWithholdingRate ?? null)
-          : existing.rsuWithholdingRate,
-        body.rsuWithholdingMethod !== undefined
-          ? (body.rsuWithholdingMethod ?? null)
-          : existing.rsuWithholdingMethod,
-        body.dividendGrossGbp !== undefined
-          ? (body.dividendGrossGbp ?? null)
-          : existing.dividendGrossGbp,
-        body.dividendWithholdingGbp !== undefined
-          ? (body.dividendWithholdingGbp ?? null)
-          : existing.dividendWithholdingGbp,
-        body.dividendNetGbp !== undefined ? (body.dividendNetGbp ?? null) : existing.dividendNetGbp,
-        body.splitRatio !== undefined ? (body.splitRatio ?? null) : existing.splitRatio,
-        body.capreturnsPerShareGbp !== undefined
-          ? (body.capreturnsPerShareGbp ?? null)
-          : existing.capreturnsPerShareGbp,
-        body.notes !== undefined ? (body.notes ?? null) : existing.notes,
+      const values: ColumnValues = {}
+      for (const { field, column, required } of UPDATABLE) {
+        const incoming = patch[field]
+        values[column] = (
+          required
+            ? (incoming ?? current[field])
+            : incoming !== undefined
+              ? (incoming ?? null)
+              : current[field]
+        ) as string | null
+      }
+
+      updateRow(db, codec, TABLE, id, values, {
+        where: 'tenant_id = ?',
+        whereParams: [tenantId],
+        extraSet: "updated_at = datetime('now')",
+      })
+
+      writeAudit(db, cipher, {
         tenantId,
-        id,
-      )
-
-      db.prepare(`
-        INSERT INTO audit_log (tenant_id, user_id, action, entity_type, entity_id, old_data, new_data)
-        VALUES (?, ?, 'txn.update', 'txn', ?, ?, ?)
-      `).run(tenantId, userId, id, JSON.stringify(old), JSON.stringify(body))
+        userId,
+        action: 'txn.update',
+        entityType: 'txn',
+        entityId: id,
+        oldData: old,
+        newData: body,
+      })
 
       return this.getById(tenantId, id)!
     },
@@ -260,10 +249,14 @@ export function createTransactionStore(db: Db): TransactionStore {
       const existing = this.getById(tenantId, id)
       if (!existing) return false
       db.prepare('DELETE FROM txn WHERE tenant_id = ? AND id = ?').run(tenantId, id)
-      db.prepare(`
-        INSERT INTO audit_log (tenant_id, user_id, action, entity_type, entity_id, old_data)
-        VALUES (?, ?, 'txn.delete', 'txn', ?, ?)
-      `).run(tenantId, userId, id, JSON.stringify(existing))
+      writeAudit(db, cipher, {
+        tenantId,
+        userId,
+        action: 'txn.delete',
+        entityType: 'txn',
+        entityId: id,
+        oldData: existing,
+      })
       return true
     },
   }

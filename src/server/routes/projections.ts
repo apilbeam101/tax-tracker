@@ -1,18 +1,6 @@
 import Big from 'big.js'
 import type { FastifyPluginAsync } from 'fastify'
 
-interface VestScheduleRow {
-  id: number
-  instrument_id: number
-  schedule_type: string
-  scheduled_date: string
-  quantity: string
-  expected_price_usd: string | null
-  expected_discount_price_native: string | null
-  notes: string | null
-  realised_txn_id: number | null
-}
-
 interface ProjectedEvent {
   id: number
   instrumentId: number
@@ -44,33 +32,25 @@ export const projectionRoutes: FastifyPluginAsync = async (app) => {
       // Default: show events in the next 2 years
       const to = req.query.to ?? `${parseInt(today.slice(0, 4), 10) + 2}-${today.slice(5)}`
 
-      let query = `
-        SELECT vs.*, i.ticker, i.currency
-        FROM vest_schedule vs
-        JOIN instrument i ON i.id = vs.instrument_id
-        WHERE vs.tenant_id = ?
-          AND vs.scheduled_date >= ?
-          AND vs.scheduled_date <= ?
-          AND vs.realised_txn_id IS NULL
-      `
-      const params: (string | number)[] = [user.tenantId, from, to]
-
-      if (req.query.instrumentId) {
-        query += ' AND vs.instrument_id = ?'
-        params.push(parseInt(req.query.instrumentId, 10))
-      }
-
-      query += ' ORDER BY vs.scheduled_date ASC'
-
-      const rows = app.db.prepare(query).all(...params) as unknown as (VestScheduleRow & {
-        ticker: string
-        currency: string
-      })[]
+      const instruments = new Map(app.instruments.list(user.tenantId).map((i) => [i.id, i]))
+      const rows = app.vestSchedules
+        .list(user.tenantId, {
+          from,
+          to,
+          unrealisedOnly: true,
+          ...(req.query.instrumentId ? { instrumentId: parseInt(req.query.instrumentId, 10) } : {}),
+        })
+        .flatMap((schedule) => {
+          const instrument = instruments.get(schedule.instrumentId)
+          return instrument
+            ? [{ ...schedule, ticker: instrument.ticker, currency: instrument.currency }]
+            : []
+        })
 
       const results: ProjectedEvent[] = []
 
       for (const row of rows) {
-        const latest = app.priceService.getLatestCached(row.instrument_id)
+        const latest = app.priceService.getLatestCached(row.instrumentId)
         let latestPriceNative: string | null = null
         let latestPriceDate: string | null = null
         let projectedValueGbp: string | null = null
@@ -93,21 +73,18 @@ export const projectionRoutes: FastifyPluginAsync = async (app) => {
             const qty = new Big(row.quantity)
             projectedValueGbp = qty.times(priceGbp).toFixed(2)
 
-            if (row.schedule_type === 'rsu-vest') {
+            if (row.scheduleType === 'rsu-vest') {
               // Employment income = gross value at vest (use projected value as estimate)
               estimatedIncomeGbp = projectedValueGbp
-            } else if (
-              row.schedule_type === 'espp-purchase' &&
-              row.expected_discount_price_native
-            ) {
+            } else if (row.scheduleType === 'espp-purchase' && row.expectedDiscountPriceNative) {
               // For ESPP, income = (MV at purchase - discounted price) × qty.
               // MV is estimated from the latest price; discounted price stored as native.
               const discountPriceGbp =
                 row.currency === 'GBP'
-                  ? new Big(row.expected_discount_price_native)
+                  ? new Big(row.expectedDiscountPriceNative)
                   : row.currency === 'GBX'
-                    ? new Big(row.expected_discount_price_native).div(100)
-                    : new Big(row.expected_discount_price_native)
+                    ? new Big(row.expectedDiscountPriceNative).div(100)
+                    : new Big(row.expectedDiscountPriceNative)
                         .times(priceGbp)
                         .div(new Big(latest.closePrice))
               const discountPerShare = priceGbp.minus(discountPriceGbp)
@@ -123,13 +100,13 @@ export const projectionRoutes: FastifyPluginAsync = async (app) => {
 
         results.push({
           id: row.id,
-          instrumentId: row.instrument_id,
+          instrumentId: row.instrumentId,
           ticker: row.ticker,
           currency: row.currency,
-          scheduleType: row.schedule_type,
-          scheduledDate: row.scheduled_date,
+          scheduleType: row.scheduleType,
+          scheduledDate: row.scheduledDate,
           quantity: row.quantity,
-          expectedDiscountPriceNative: row.expected_discount_price_native,
+          expectedDiscountPriceNative: row.expectedDiscountPriceNative,
           latestPriceNative,
           latestPriceDate,
           projectedValueGbp,
@@ -178,36 +155,26 @@ export const projectionRoutes: FastifyPluginAsync = async (app) => {
       const inst = app.instruments.getById(user.tenantId, req.body.instrumentId)
       if (!inst) return reply.status(404).send({ error: 'Instrument not found' })
 
-      const result = app.db
-        .prepare(`
-        INSERT INTO vest_schedule
-          (tenant_id, instrument_id, schedule_type, scheduled_date, quantity, expected_price_usd, expected_discount_price_native, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-        .run(
-          user.tenantId,
-          req.body.instrumentId,
-          req.body.scheduleType,
-          req.body.scheduledDate,
-          req.body.quantity,
-          req.body.expectedPriceUsd ?? null,
-          req.body.expectedDiscountPriceNative ?? null,
-          req.body.notes ?? null,
-        )
+      const created = app.vestSchedules.create(user.tenantId, {
+        instrumentId: req.body.instrumentId,
+        scheduleType: req.body.scheduleType,
+        scheduledDate: req.body.scheduledDate,
+        quantity: req.body.quantity,
+        expectedPriceUsd: req.body.expectedPriceUsd ?? null,
+        expectedDiscountPriceNative: req.body.expectedDiscountPriceNative ?? null,
+        notes: req.body.notes ?? null,
+      })
 
-      return reply.status(201).send({ id: result.lastInsertRowid })
+      return reply.status(201).send({ id: created.id })
     },
   )
 
   // ── DELETE /api/projections/:id ───────────────────────────────────────────
   app.delete<{ Params: { id: string } }>('/:id', async (req, reply) => {
     const user = req.session.user!
-    const row = app.db
-      .prepare('SELECT id FROM vest_schedule WHERE id = ? AND tenant_id = ?')
-      .get(req.params.id, user.tenantId)
-    if (!row) return reply.status(404).send({ error: 'Not found' })
-
-    app.db.prepare('DELETE FROM vest_schedule WHERE id = ?').run(req.params.id)
+    if (!app.vestSchedules.delete(user.tenantId, Number(req.params.id))) {
+      return reply.status(404).send({ error: 'Not found' })
+    }
     return reply.status(204).send()
   })
 }

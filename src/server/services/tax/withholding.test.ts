@@ -1,30 +1,13 @@
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
-import { fileURLToPath } from 'node:url'
+import type { DatabaseSync } from 'node:sqlite'
 import type { FastifyInstance } from 'fastify'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { plainCipher } from '../../crypto/fields.ts'
+import { createTestDb } from '../../db/testdb.ts'
 import { createInstrumentStore } from '../../repositories/sqlite/InstrumentStore.ts'
 import { createTransactionStore } from '../../repositories/sqlite/TransactionStore.ts'
 import { applyAutoWithholding, backfillAutoWithholding, wasAutoWithheld } from './withholding.ts'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const MIGRATIONS_DIR = join(__dirname, '../../db/migrations')
-
-function setupDb(): DatabaseSync {
-  const db = new DatabaseSync(':memory:')
-  db.exec('PRAGMA foreign_keys = ON')
-  for (const file of [
-    '001_core_schema.sql',
-    '002_tax_years_2020_2022.sql',
-    '003_rename_dividend_types.sql',
-    '004_espp_discount_price.sql',
-    '005_vest_schedule_espp_discount.sql',
-  ]) {
-    db.exec(readFileSync(join(MIGRATIONS_DIR, file), 'utf-8'))
-  }
-  return db
-}
+const setupDb = createTestDb
 
 describe('applyAutoWithholding', () => {
   let db: DatabaseSync
@@ -33,8 +16,8 @@ describe('applyAutoWithholding', () => {
 
   beforeEach(() => {
     db = setupDb()
-    instruments = createInstrumentStore(db)
-    transactions = createTransactionStore(db)
+    instruments = createInstrumentStore(db, plainCipher)
+    transactions = createTransactionStore(db, plainCipher)
   })
 
   it('auto-populates 15% withholding for a USD dividend with no explicit value', () => {
@@ -127,8 +110,8 @@ describe('wasAutoWithheld', () => {
 
   beforeEach(() => {
     db = setupDb()
-    instruments = createInstrumentStore(db)
-    transactions = createTransactionStore(db)
+    instruments = createInstrumentStore(db, plainCipher)
+    transactions = createTransactionStore(db, plainCipher)
   })
 
   it('is true for a value that matches the auto-computed 15% of gross', () => {
@@ -207,8 +190,8 @@ describe('backfillAutoWithholding', () => {
 
   beforeEach(() => {
     db = setupDb()
-    instruments = createInstrumentStore(db)
-    transactions = createTransactionStore(db)
+    instruments = createInstrumentStore(db, plainCipher)
+    transactions = createTransactionStore(db, plainCipher)
     app = { db, transactions, instruments } as unknown as FastifyInstance
     db.prepare(
       "INSERT INTO user (tenant_id, username, password_hash) VALUES (1, 'admin', 'x')",

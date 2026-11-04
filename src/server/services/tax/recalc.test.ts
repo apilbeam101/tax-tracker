@@ -1,29 +1,21 @@
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
-import { fileURLToPath } from 'node:url'
+import type { DatabaseSync } from 'node:sqlite'
 import type { FastifyInstance } from 'fastify'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { plainCipher } from '../../crypto/fields.ts'
+import { createTestDb } from '../../db/testdb.ts'
 import { createInstrumentStore } from '../../repositories/sqlite/InstrumentStore.ts'
 import { createTransactionStore } from '../../repositories/sqlite/TransactionStore.ts'
+import { createVestScheduleStore } from '../../repositories/sqlite/VestScheduleStore.ts'
 import { backfillRealisedProjections, linkRealisedProjection } from './recalc.ts'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const MIGRATIONS_DIR = join(__dirname, '../../db/migrations')
+const setupDb = createTestDb
 
-function setupDb(): DatabaseSync {
-  const db = new DatabaseSync(':memory:')
-  db.exec('PRAGMA foreign_keys = ON')
-  for (const file of [
-    '001_core_schema.sql',
-    '002_tax_years_2020_2022.sql',
-    '003_rename_dividend_types.sql',
-    '004_espp_discount_price.sql',
-    '005_vest_schedule_espp_discount.sql',
-  ]) {
-    db.exec(readFileSync(join(MIGRATIONS_DIR, file), 'utf-8'))
-  }
-  return db
+function makeApp(db: DatabaseSync): FastifyInstance {
+  return {
+    db,
+    transactions: createTransactionStore(db, plainCipher),
+    vestSchedules: createVestScheduleStore(db, plainCipher),
+  } as unknown as FastifyInstance
 }
 
 function insertProjection(
@@ -55,14 +47,14 @@ describe('recalc — projection linking', () => {
 
   beforeEach(() => {
     db = setupDb()
-    app = { db } as unknown as FastifyInstance
-    const instruments = createInstrumentStore(db)
+    app = makeApp(db)
+    const instruments = createInstrumentStore(db, plainCipher)
     instrumentId = instruments.create(1, { ticker: 'AAPL', name: 'Apple', currency: 'USD' }, 1).id
   })
 
   it('links a transaction dated a few days off from its projection under the tolerance window', () => {
     const projectionId = insertProjection(db, instrumentId, '2025-06-01', '50')
-    const txns = createTransactionStore(db)
+    const txns = createTransactionStore(db, plainCipher)
     const txn = txns.create(
       1,
       {
@@ -81,7 +73,7 @@ describe('recalc — projection linking', () => {
 
   it('does not link a transaction outside the tolerance window', () => {
     const projectionId = insertProjection(db, instrumentId, '2025-06-01', '50')
-    const txns = createTransactionStore(db)
+    const txns = createTransactionStore(db, plainCipher)
     const txn = txns.create(
       1,
       {
@@ -103,7 +95,7 @@ describe('recalc — projection linking', () => {
     // TY 2025-26. Within the ±7-day window, but must not cross tax years —
     // it would silently move projected income out of the wrong year.
     const projectionId = insertProjection(db, instrumentId, '2025-04-03', '50')
-    const txns = createTransactionStore(db)
+    const txns = createTransactionStore(db, plainCipher)
     const txn = txns.create(
       1,
       { instrumentId, txnType: 'RSU_VEST', txnDate: '2025-04-08', quantity: '50' },
@@ -123,14 +115,14 @@ describe('backfillRealisedProjections', () => {
 
   beforeEach(() => {
     db = setupDb()
-    app = { db } as unknown as FastifyInstance
-    const instruments = createInstrumentStore(db)
+    app = makeApp(db)
+    const instruments = createInstrumentStore(db, plainCipher)
     instrumentId = instruments.create(1, { ticker: 'AAPL', name: 'Apple', currency: 'USD' }, 1).id
   })
 
   it('retroactively links an old projection to a pre-existing matching transaction', () => {
     const projectionId = insertProjection(db, instrumentId, '2025-06-01', '50')
-    const txns = createTransactionStore(db)
+    const txns = createTransactionStore(db, plainCipher)
     const txn = txns.create(
       1,
       { instrumentId, txnType: 'RSU_VEST', txnDate: '2025-06-01', quantity: '50' },
@@ -144,7 +136,7 @@ describe('backfillRealisedProjections', () => {
 
   it('is a no-op the second time it runs', () => {
     const projectionId = insertProjection(db, instrumentId, '2025-06-01', '50')
-    const txns = createTransactionStore(db)
+    const txns = createTransactionStore(db, plainCipher)
     txns.create(1, { instrumentId, txnType: 'RSU_VEST', txnDate: '2025-06-01', quantity: '50' }, 1)
 
     backfillRealisedProjections(app)
@@ -164,7 +156,7 @@ describe('backfillRealisedProjections', () => {
 
   it('does not link across a UK tax-year boundary', () => {
     const projectionId = insertProjection(db, instrumentId, '2025-04-03', '50')
-    const txns = createTransactionStore(db)
+    const txns = createTransactionStore(db, plainCipher)
     txns.create(1, { instrumentId, txnType: 'RSU_VEST', txnDate: '2025-04-08', quantity: '50' }, 1)
 
     backfillRealisedProjections(app)
@@ -174,7 +166,7 @@ describe('backfillRealisedProjections', () => {
 
   it("does not let a transaction from one tenant satisfy another tenant's projection", () => {
     db.prepare("INSERT INTO tenant (id, name) VALUES (2, 'other')").run()
-    const instruments = createInstrumentStore(db)
+    const instruments = createInstrumentStore(db, plainCipher)
     const otherInstrumentId = instruments.create(
       2,
       { ticker: 'AAPL', name: 'Apple', currency: 'USD' },
@@ -183,7 +175,7 @@ describe('backfillRealisedProjections', () => {
     const projectionId = insertProjection(db, otherInstrumentId, '2025-06-01', '50')
     db.prepare('UPDATE vest_schedule SET tenant_id = 2 WHERE id = ?').run(projectionId)
 
-    const txns = createTransactionStore(db)
+    const txns = createTransactionStore(db, plainCipher)
     txns.create(1, { instrumentId, txnType: 'RSU_VEST', txnDate: '2025-06-01', quantity: '50' }, 1)
 
     backfillRealisedProjections(app)

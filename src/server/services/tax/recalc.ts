@@ -17,6 +17,21 @@ const TXN_TYPE_BY_SCHEDULE_TYPE: Record<string, string> = {
 // exact equality.
 const LINK_DATE_TOLERANCE_DAYS = 7
 
+// Null for an impossible date (month 13, day 32), where SQLite's date() used to return NULL and
+// simply match nothing; throwing here would instead fail the save or stop the server booting.
+function shiftDate(date: string, days: number): string | null {
+  const d = new Date(`${date}T00:00:00Z`)
+  if (Number.isNaN(d.getTime())) return null
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+function windowAround(date: string): { from: string; to: string } | null {
+  const from = shiftDate(date, -LINK_DATE_TOLERANCE_DAYS)
+  const to = shiftDate(date, LINK_DATE_TOLERANCE_DAYS)
+  return from && to ? { from, to } : null
+}
+
 function daysBetween(a: string, b: string): number {
   return Math.abs(new Date(a).getTime() - new Date(b).getTime()) / 86_400_000
 }
@@ -95,7 +110,12 @@ export function recalcInstrument(
  * Per-instrument errors are logged and skipped so one unmatched disposal can't
  * stop the server coming up.
  */
-export function recalcAllInstruments(app: FastifyInstance): void {
+export type RecalcDeps = Pick<
+  FastifyInstance,
+  'db' | 'instruments' | 'transactions' | 'cgtDisposals' | 's104Pools'
+> & { log: { warn: (details: object, message: string) => void } }
+
+export function recalcAllInstruments(app: RecalcDeps): void {
   const tenantIds = (
     app.db.prepare('SELECT DISTINCT tenant_id FROM instrument').all() as unknown as {
       tenant_id: number
@@ -114,7 +134,7 @@ export function recalcAllInstruments(app: FastifyInstance): void {
         )
       } catch (err) {
         app.log.warn(
-          { err, tenantId, instrumentId: inst.id, ticker: inst.ticker },
+          { err, tenantId, instrumentId: inst.id },
           'startup pool recalc failed for instrument — its S104 pool and disposals are left as previously persisted',
         )
       }
@@ -143,22 +163,17 @@ export function linkRealisedProjection(
   const scheduleType = SCHEDULE_TYPE_BY_TXN_TYPE[txnType]
   if (!scheduleType) return
 
-  const candidates = app.db
-    .prepare(`
-      SELECT id, scheduled_date AS date, quantity
-      FROM vest_schedule
-      WHERE tenant_id = ? AND instrument_id = ? AND schedule_type = ?
-        AND scheduled_date BETWEEN date(?, '-${LINK_DATE_TOLERANCE_DAYS} days') AND date(?, '+${LINK_DATE_TOLERANCE_DAYS} days')
-        AND realised_txn_id IS NULL
-    `)
-    .all(tenantId, instrumentId, scheduleType, txnDate, txnDate) as unknown as LinkCandidate[]
+  const window = windowAround(txnDate)
+  if (!window) return
+
+  const candidates: LinkCandidate[] = app.vestSchedules
+    .list(tenantId, { instrumentId, scheduleType, ...window, unrealisedOnly: true })
+    .map((s) => ({ id: s.id, date: s.scheduledDate, quantity: s.quantity }))
 
   const best = pickBestCandidate(candidates, txnDate, quantity)
   if (!best) return
 
-  app.db
-    .prepare('UPDATE vest_schedule SET realised_txn_id = ? WHERE tenant_id = ? AND id = ?')
-    .run(txnId, tenantId, best.id)
+  app.vestSchedules.setRealisedTxn(tenantId, best.id, txnId)
 }
 
 /**
@@ -169,51 +184,24 @@ export function linkRealisedProjection(
  * untouched.
  */
 export function backfillRealisedProjections(app: FastifyInstance): void {
-  const pending = app.db
-    .prepare(`
-      SELECT id, tenant_id, instrument_id, schedule_type, scheduled_date, quantity
-      FROM vest_schedule WHERE realised_txn_id IS NULL
-      ORDER BY scheduled_date ASC, id ASC
-    `)
-    .all() as {
-    id: number
-    tenant_id: number
-    instrument_id: number
-    schedule_type: string
-    scheduled_date: string
-    quantity: string
-  }[]
-
-  for (const row of pending) {
-    const txnType = TXN_TYPE_BY_SCHEDULE_TYPE[row.schedule_type]
+  for (const row of app.vestSchedules.listAllUnrealised()) {
+    const txnType = TXN_TYPE_BY_SCHEDULE_TYPE[row.scheduleType]
     if (!txnType) continue
 
-    const candidates = app.db
-      .prepare(`
-        SELECT id, txn_date AS date, quantity
-        FROM txn
-        WHERE tenant_id = ? AND instrument_id = ? AND txn_type = ?
-          AND txn_date BETWEEN date(?, '-${LINK_DATE_TOLERANCE_DAYS} days') AND date(?, '+${LINK_DATE_TOLERANCE_DAYS} days')
-          AND id NOT IN (
-            SELECT realised_txn_id FROM vest_schedule
-            WHERE tenant_id = ? AND realised_txn_id IS NOT NULL
-          )
-      `)
-      .all(
-        row.tenant_id,
-        row.instrument_id,
-        txnType,
-        row.scheduled_date,
-        row.scheduled_date,
-        row.tenant_id,
-      ) as unknown as LinkCandidate[]
+    const window = windowAround(row.scheduledDate)
+    if (!window) continue
 
-    const best = pickBestCandidate(candidates, row.scheduled_date, row.quantity)
+    // Read per entry: a transaction claimed by an earlier entry in this pass must not be offered again.
+    const linked = app.vestSchedules.linkedTxnIds(row.tenantId)
+    const candidates: LinkCandidate[] = app.transactions
+      .list(row.tenantId, { instrumentId: row.instrumentId, ...window })
+      .filter((t) => t.txnType === txnType && !linked.has(t.id))
+      .map((t) => ({ id: t.id, date: t.txnDate, quantity: t.quantity }))
+
+    const best = pickBestCandidate(candidates, row.scheduledDate, row.quantity)
     if (!best) continue
 
-    app.db
-      .prepare('UPDATE vest_schedule SET realised_txn_id = ? WHERE tenant_id = ? AND id = ?')
-      .run(best.id, row.tenant_id, row.id)
+    app.vestSchedules.setRealisedTxn(row.tenantId, row.id, best.id)
   }
 }
 
@@ -223,9 +211,5 @@ export function unlinkRealisedProjection(
   tenantId: number,
   txnId: number,
 ): void {
-  app.db
-    .prepare(
-      'UPDATE vest_schedule SET realised_txn_id = NULL WHERE tenant_id = ? AND realised_txn_id = ?',
-    )
-    .run(tenantId, txnId)
+  app.vestSchedules.clearRealisedTxn(tenantId, txnId)
 }

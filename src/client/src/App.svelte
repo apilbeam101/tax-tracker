@@ -2,38 +2,135 @@
   import { onMount } from 'svelte'
   import Setup from './routes/Setup.svelte'
   import Login from './routes/Login.svelte'
+  import Recover from './routes/Recover.svelte'
   import Dashboard from './routes/Dashboard.svelte'
-  import { apiFetch, clearCsrfToken } from './lib/api.ts'
+  import Upgrade from './routes/Upgrade.svelte'
+  import RecoveryKey from './routes/RecoveryKey.svelte'
+  import ApiKeys from './routes/ApiKeys.svelte'
+  import type { SetupResult } from './routes/Setup.svelte'
+  import type { UpgradeResult } from './routes/Upgrade.svelte'
+  import { apiFetch, clearCsrfToken, watchSessionLoss } from './lib/api.ts'
 
-  type AppState = 'loading' | 'setup' | 'login' | 'app'
+  type AppState = 'loading' | 'setup' | 'login' | 'recover' | 'upgrade' | 'recovery-key' | 'api-keys' | 'app'
 
   let state: AppState = $state('loading')
   let currentUser: { username: string } | null = $state(null)
+  // The data is encrypted and currently locked: signing in is also what unlocks it.
+  let locked = $state(false)
+  // Key slots exist, so a recovery key can reset a forgotten passphrase.
+  let canRecover = $state(false)
+  // 'available': not encrypted yet. 'confirm': encrypted, recovery key not yet proven.
+  let upgrade: 'none' | 'available' | 'confirm' = $state('none')
+  let upgradeSkipped = $state(false)
+  let unattendedKeyAvailable = $state(false)
+  // Set only in the session that ran the upgrade: the recovery key is never shown again.
+  let freshKey: UpgradeResult | null = $state(null)
 
-  onMount(async () => {
+  // Asks the server where things stand, e.g. whether signing out re-locked the data.
+  async function refreshStatus() {
+    try {
+      const data = await (await fetch('/api/auth/status')).json()
+      locked = !!data.locked
+      canRecover = data.unlockMode !== 'none'
+      upgrade = data.upgrade ?? 'none'
+      unattendedKeyAvailable = !!data.unattendedKeyAvailable
+    } catch {
+      /* keep the previous values */
+    }
+  }
+
+  function stateAfterSignIn(): AppState {
+    if (upgrade === 'confirm') return 'recovery-key'
+    if (upgrade === 'available' && !upgradeSkipped) return 'upgrade'
+    return 'app'
+  }
+
+  onMount(() => {
+    watchSessionLoss({
+      locked: () => {
+        currentUser = null
+        freshKey = null
+        locked = true
+        canRecover = true
+        state = 'login'
+      },
+      ended: () => {
+        if (state === 'loading' || state === 'setup' || state === 'login' || state === 'recover') {
+          return
+        }
+        currentUser = null
+        // The recovery key from the upgrade is shown once, in the session that made it.
+        freshKey = null
+        state = 'login'
+        void refreshStatus()
+      },
+    })
+    void init()
+    return () => watchSessionLoss(null)
+  })
+
+  async function init() {
     try {
       const res = await fetch('/api/auth/status')
       const data = await res.json()
+      locked = !!data.locked
+      canRecover = data.unlockMode !== 'none'
+      upgrade = data.upgrade ?? 'none'
+      unattendedKeyAvailable = !!data.unattendedKeyAvailable
       if (data.setupRequired) {
         state = 'setup'
       } else if (!data.authenticated) {
         state = 'login'
       } else {
         currentUser = data.user
-        state = 'app'
+        state = stateAfterSignIn()
       }
     } catch {
       state = 'login'
     }
-  })
-
-  function onSetupComplete() {
-    state = 'login'
   }
 
-  function onLoginSuccess(user: { username: string }) {
+  async function onSetupComplete(result: SetupResult) {
+    currentUser = result.user
+    locked = false
+    clearCsrfToken()
+    if (!result.recoveryKey) {
+      await refreshStatus()
+      state = stateAfterSignIn()
+      return
+    }
+    canRecover = true
+    freshKey = {
+      recoveryKey: result.recoveryKey,
+      safetyCopy: '',
+      plaintextCopies: [],
+      scrubbed: true,
+      unattended: result.unattended,
+      firstRun: true,
+    }
+    upgrade = 'confirm'
+    state = 'recovery-key'
+  }
+
+  async function onLoginSuccess(user: { username: string }) {
     currentUser = user
-    state = 'app'
+    locked = false
+    clearCsrfToken()
+    await refreshStatus()
+    state = stateAfterSignIn()
+  }
+
+  function onUpgraded(result: UpgradeResult) {
+    freshKey = result
+    upgrade = 'confirm'
+    state = 'recovery-key'
+  }
+
+  function onKeyConfirmed() {
+    const firstRun = freshKey?.firstRun === true
+    freshKey = null
+    upgrade = 'none'
+    state = firstRun ? 'api-keys' : 'app'
   }
 
   async function onLogout() {
@@ -41,7 +138,9 @@
     if (!res.ok) return
     clearCsrfToken()
     currentUser = null
+    freshKey = null
     state = 'login'
+    await refreshStatus()
   }
 </script>
 
@@ -49,10 +148,43 @@
   <div class="loading">Loading…</div>
 
 {:else if state === 'setup'}
-  <Setup oncomplete={onSetupComplete} />
+  <Setup {unattendedKeyAvailable} oncomplete={onSetupComplete} onalready={() => void init()} />
 
 {:else if state === 'login'}
-  <Login onsuccess={onLoginSuccess} />
+  <Login
+    onsuccess={onLoginSuccess}
+    {locked}
+    {canRecover}
+    onrecover={() => (state = 'recover')}
+  />
+
+{:else if state === 'recover'}
+  <Recover onsuccess={onLoginSuccess} oncancel={() => (state = 'login')} />
+
+{:else if state === 'upgrade'}
+  <Upgrade
+    {unattendedKeyAvailable}
+    onupgraded={onUpgraded}
+    onalready={async () => {
+      await refreshStatus()
+      freshKey = null
+      state = 'recovery-key'
+    }}
+    onskip={() => {
+      upgradeSkipped = true
+      state = 'app'
+    }}
+  />
+
+{:else if state === 'recovery-key'}
+  <RecoveryKey {freshKey} onconfirmed={onKeyConfirmed} onlater={() => (state = 'app')} />
+
+{:else if state === 'api-keys'}
+  <div class="step">
+    <div class="step-card">
+      <ApiKeys ondone={() => (state = 'app')} />
+    </div>
+  </div>
 
 {:else}
   <Dashboard user={currentUser} onlogout={onLogout} />
@@ -173,6 +305,14 @@
     font-family: system-ui, -apple-system, sans-serif;
     background: var(--bg);
     color: var(--text);
+  }
+  .step {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 1rem;
+  }
+  .step-card {
+    background: var(--surface); border-radius: 8px; padding: 2rem;
+    width: 100%; max-width: 620px; box-shadow: 0 2px 12px var(--shadow);
   }
   .loading {
     display: flex;

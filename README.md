@@ -61,10 +61,12 @@ npm install
 ### 2. Generate secrets
 
 ```bash
-# SESSION_SECRET — at least 32 bytes of random hex
+# SESSION_SECRET — at least 32 bytes of random hex. Skip it if you set AUTO_CONFIG=true (see below):
+# the app then generates one into config.json in the data directory.
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
-# ENCRYPTION_KEY — 32-byte key for AES-256-GCM field encryption
+# ENCRYPTION_KEY — optional, only for an always-on server that should unlock its data by itself
+# at startup (see the table below). Skip it for a laptop install.
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
@@ -78,22 +80,32 @@ Edit `.env` and fill in:
 
 | Variable | Required | Description |
 |---|---|---|
-| `SESSION_SECRET` | Yes | 64-char hex string for cookie signing |
-| `ENCRYPTION_KEY` | Yes | 64-char hex string for field-level AES-256-GCM encryption |
+| `AUTO_CONFIG` | No | `false` (default when the server is started directly or in Docker): every setting comes from the environment and the app never writes configuration. `true` (default for the `tax-tracker` command): self-configured mode, see below. Set `AUTO_CONFIG=false` in `.env` to keep env-supplied mode with `npm start` |
+| `SESSION_SECRET` | Yes, unless `AUTO_CONFIG=true` | 64-char hex string for cookie signing (placeholders and short values are rejected) |
+| `ENCRYPTION_KEY` | No | 64-char hex string. Optional: when you encrypt the database you can choose to use it to unlock the data automatically at startup. The key then sits next to the data, so leave it unset unless the server must restart unattended |
 | `PORT` | No | Server port (default: `3000`) |
 | `HOST` | No | Bind address (default: `127.0.0.1`) |
-| `DB_PATH` | No | SQLite file path (default: `./data/taxtracker.db`) |
+| `DB_PATH` | No | SQLite file path. Takes precedence over `DATA_DIR` |
+| `DATA_DIR` | No | Directory for `taxtracker.db`. If neither is set, `./data` is used when it already holds a database, otherwise the per-user OS data directory. The resolved path is logged at startup |
 | `FX_RATE_POLICY` | No | `hmrc-monthly` (default) or `daily-spot` |
 | `TIINGO_API_KEY` | No | Live price data (free tier: 500 symbols, 50 req/hr) |
 | `ALPHA_VANTAGE_API_KEY` | No | Dividend history import (free at alphavantage.co) |
-| `NODE_ENV` | No | Set to `production` to enable secure cookies over HTTPS |
+| `SECURE_COOKIES` | No | `auto` (default: Secure when the request arrived over HTTPS), `true` or `false` |
+| `TRUST_PROXY` | No | Set when behind a reverse proxy so `auto` sees the original protocol: `true`, or a comma-separated list of IPs, CIDRs or `loopback`/`linklocal`/`uniquelocal` (see [Reverse proxy](#reverse-proxy-https)) |
+| `LOG_LEVEL` | No | Pino log level (default: `info`) |
+
+Every secret (`SESSION_SECRET`, `ENCRYPTION_KEY`, `TIINGO_API_KEY`, `ALPHA_VANTAGE_API_KEY`) also accepts a `_FILE` variant, for example `SESSION_SECRET_FILE=/run/secrets/session`, for Docker secrets, Kubernetes secret volumes and systemd credentials.
+
+**Self-configured mode (`AUTO_CONFIG=true`).** If `SESSION_SECRET` is not supplied, the app generates one into `config.json` in the data directory and reuses it on later starts. The file is written atomically with mode `0600` on Linux and macOS (on Windows it relies on the per-user data directory), and holds only that secret plus the non-secret settings `HOST`, `PORT`, `FX_RATE_POLICY`, `LOG_LEVEL`, `SECURE_COOKIES` and `TRUST_PROXY`. It never holds `ENCRYPTION_KEY`, API keys or any other key material, and the app refuses to start if the file contains anything else. Variables set in the environment always override the file. In a container, the data volume must be writable and persistent; otherwise the secret is regenerated at every start and everyone is signed out.
 
 ### 4. Build and start
 
 ```bash
 npm run build
-npm start
+npm start -- --env-file .env
 ```
+
+`npm start` runs the `tax-tracker` command-line tool (`node dist/server/cli.js`). It reads the environment, and `--env-file` loads a `.env` file. Other options: `--port`, `--host`, `--data-dir`, `--open`. `tax-tracker --help` lists the commands: `init`, `info`, `doctor`, `backup`, `restore`, `export`, `import`, `backfill-fx` and `keys`. The command-line tool defaults to self-configured mode (`AUTO_CONFIG=true`) unless `AUTO_CONFIG` is set.
 
 Or, for development with hot-reload:
 
@@ -103,9 +115,15 @@ npm run dev
 
 ### 5. First-run setup
 
-Open `http://localhost:3000` in your browser. You will be prompted to create a passphrase — this derives the encryption key used for sensitive field-level encryption. **Store this passphrase securely; losing it means losing access to encrypted data.**
+Open `http://localhost:3000` in your browser. Setup has three steps:
 
-After setup, log in with the username and password you created. A 🌙/☀️ toggle in the nav bar (next to the number-masking toggle) switches between light and dark themes; the choice is remembered in your browser.
+1. Choose a passphrase. It signs you in and unlocks your data: it protects a randomly generated data key, which in turn protects the sensitive fields.
+2. Save your **recovery key**. It is shown once and you must type it back to continue. It is the only way back in if you forget your passphrase. **Store the passphrase and the recovery key securely and separately; losing both means losing access to your data.**
+3. Optionally enter API keys (Tiingo, Alpha Vantage). In self-configured mode (`AUTO_CONFIG=true`), keys entered here are stored encrypted with your data and can be changed later under Settings. In env-supplied mode (the default outside the `tax-tracker` command) the API key fields are read-only: keys come from the environment (`.env`, Docker or Kubernetes secrets), so a redeploy always matches what you configured. A key supplied through the environment always takes precedence and is shown as "Set via environment".
+
+If you started from a database created by an earlier version, you are offered an in-app upgrade after you sign in instead.
+
+Setup signs you in. On later visits, sign in with username `admin` and your passphrase; that also unlocks your data. A 🌙/☀️ toggle in the nav bar (next to the number-masking toggle) switches between light and dark themes; the choice is remembered in your browser.
 
 ---
 
@@ -115,7 +133,7 @@ After setup, log in with the username and password you created. A 🌙/☀️ to
 cp .env.example .env
 ```
 
-Edit `.env` and fill in **real, generated** `SESSION_SECRET`/`ENCRYPTION_KEY` values (step 2 above) — the placeholders in `.env.example` are non-empty strings that pass validation, so the app will start happily with a publicly-known secret if you skip this.
+Edit `.env` and fill in a **real, generated** `SESSION_SECRET` (step 2 above) — the app refuses to start if it, or an `ENCRYPTION_KEY` you set, still holds the `CHANGE_ME` placeholder.
 
 The container runs as a fixed non-root UID (`10001`), and its SQLite data lives in a directory bind-mounted from the host (`./data`) so it survives a container recreate. That host directory needs to already be owned by that UID before the first run — Docker does not do this for you on a bind mount:
 
@@ -130,22 +148,23 @@ Then build and start:
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-The published port is bound to `127.0.0.1` only, same as the non-Docker setup — put it behind a reverse proxy (see [Reverse proxy (HTTPS)](#reverse-proxy-https) below) rather than exposing it directly. `npm run backup` on the host still works unmodified against `data/taxtracker.db`, since the container's `DB_PATH` maps to the same relative path.
+The published port is bound to `127.0.0.1` only, same as the non-Docker setup — put it behind a reverse proxy (see [Reverse proxy (HTTPS)](#reverse-proxy-https) below) rather than exposing it directly. `npm start -- backup --data-dir ./data` on the host (add `--env-file .env` if your settings live there) works against the bind-mounted `data/taxtracker.db`.
+
+The image's entrypoint is the `tax-tracker` command with `start` as its default, so one-off commands run in the same image (`docker compose -f deploy/docker-compose.yml run --rm tax-tracker info`). Containers stay in env-supplied mode (`AUTO_CONFIG=false`) unless you set `AUTO_CONFIG=true`.
 
 ---
 
 ## Optional: Live prices (Tiingo)
 
 1. Sign up for a free account at [tiingo.com](https://www.tiingo.com)
-2. Copy your API token to `.env` as `TIINGO_API_KEY`
-3. Restart the server
+2. Set it in the environment (`.env`) as `TIINGO_API_KEY` and restart the server, or, with `AUTO_CONFIG=true`, enter it under Settings in the app (no restart needed)
 
 Without Tiingo, prices fall back to Yahoo Finance (no API key required). If neither returns data, holdings valuations will show `—`.
 
 ## Optional: Dividend history import (Alpha Vantage)
 
 1. Get a free API key at [alphavantage.co](https://www.alphavantage.co)
-2. Add to `.env` as `ALPHA_VANTAGE_API_KEY`
+2. Set `ALPHA_VANTAGE_API_KEY` in the environment, or, with `AUTO_CONFIG=true`, enter it under Settings in the app
 3. Use the "↓ Import dividends" button on the Transactions page to pull dividend history per instrument
 
 For USD-currency holdings, US withholding tax (15% under the UK-US tax treaty, assuming a valid W-8BEN is on file with your broker) is filled in automatically on dividend transactions when no withholding amount is entered or imported. Edit the transaction afterwards if your actual broker statement shows a different figure — an explicit value is never overwritten.
@@ -159,22 +178,42 @@ After entering transactions, open **Tax Summary** and click **Run tax engine** (
 If your imported transactions are missing GBP fields, run the FX backfill first:
 
 ```bash
-node --env-file=.env --import tsx/esm scripts/backfill-fx.ts
+npm start -- --env-file .env backfill-fx
 ```
+
+`backfill-fx` writes columns directly and cannot unlock a database, so it refuses to run against one that has key slots.
 
 ---
 
-## Database backup
+## Backup, restore, export and import
+
+Two different things, kept separate:
+
+| | Backup / restore | Archive (export / import) |
+|---|---|---|
+| Format | SQLite snapshot (`.db`) | Versioned JSON (`.json`) |
+| Purpose | Disaster recovery on the same or a newer version | Moving between installs, inspecting your data |
+| Contents | Everything, including the key slots; encrypted columns stay encrypted | Instruments, transactions, scheduled vests, tax year settings, exchange rates and prices; encrypted with an export passphrase unless you choose otherwise |
+| Needs | Nothing to take one; restoring needs the passphrase or recovery key that belongs to the backup | The app unlocked (or the passphrase, from the command line) |
+
+The **Import / Export > Backups & archive** tab covers both. From the command line:
 
 ```bash
-npm run backup
+tax-tracker backup                     # snapshot into <data dir>/backups/ (works while the app runs, even locked)
+tax-tracker restore <file.db>          # app must be stopped; the current database is backed up first
+tax-tracker export [--out file.json]   # encrypted with an export passphrase; --plaintext to skip
+tax-tracker import <file.json>         # into an empty database; --replace to overwrite (backs up first)
 ```
 
-Creates a timestamped copy at `data/backups/taxtracker-YYYY-MM-DDTHH-MM-SS.db`. Schedule this via cron for regular backups:
+The commands that read your data (`export`, `import`, `keys`) ask for your passphrase, or your recovery key if you have forgotten it. Once your data is encrypted, the app flags older unencrypted copies (earlier backups, `.bak` files, Ghostfolio exports) with a badge in the navigation bar and lets you delete them from the **Backups & archive** tab.
 
-```cron
-0 2 * * * cd /path/to/claude-tax && npm run backup
-```
+`tax-tracker keys rotate` replaces the key that encrypts your data and re-encrypts every record under the new one. Stop the app first; a `pre-rotation` backup is taken, you type your current passphrase (the recovery key is not accepted here), and you get a new recovery key to store, because the old one stops working. If an unattended key slot exists, the command needs the `ENCRYPTION_KEY` (or `ENCRYPTION_KEY_FILE`) that opens it, in its environment, and carries it over; with a key that does not open it, or none, the command stops, unless you pass `--drop-unattended` to remove the slot (add it back later with `keys add-unattended`). It never creates an unattended slot that did not exist. Backups and archives made before a rotation still open with the passphrase or recovery key they were made under.
+
+Backups are named `taxtracker-<timestamp>-<reason>.db`. A backup is also taken automatically before an update changes the database (`pre-migration`) and before a restore or a replace-import; those are kept. `BACKUP_SCHEDULE=daily` (the default in self-configured mode, `off` otherwise) adds one a day; the last 14 manual and the last 14 scheduled backups are kept.
+
+**Restoring from the app** stages the uploaded file, and the swap happens the next time the app starts, before the database is opened. Set `RESTORE_RESTART=exit` where a supervisor restarts the app when it exits (Docker with `restart: unless-stopped`, Kubernetes, systemd with `Restart=always`) and the app exits by itself after staging; otherwise restart it yourself. Anything written between staging and the restart is discarded. If `ENCRYPTION_KEY` is set and cannot open the backup's unattended key slot, the restore is refused rather than leaving the app unable to start.
+
+**Restoring in a container.** `tax-tracker restore` refuses while the app container is running (it checks a lock file the app refreshes every few seconds in the data volume). Stop the app, then run it from a one-off container that mounts the same volume, for example `docker compose -f deploy/docker-compose.yml run --rm tax-tracker restore /app/data/backups/<file>.db --yes` (the image's entrypoint is the `tax-tracker` command, so anything after the service name is a `tax-tracker` command; with no arguments it runs `start`). To run a command in the running container instead, `docker compose exec tax-tracker tax-tracker backup`. On Kubernetes, scale the app to zero and run a Job or pod that mounts the same claim.
 
 ---
 
@@ -182,7 +221,12 @@ Creates a timestamped copy at `data/backups/taxtracker-YYYY-MM-DDTHH-MM-SS.db`. 
 
 Run the app behind a reverse proxy with TLS. The server binds to `127.0.0.1` by default — do **not** expose port 3000 directly.
 
-Set `NODE_ENV=production` in `.env` to enable `Secure` cookies (required for HTTPS).
+Set `TRUST_PROXY` in `.env` so the app sees the original protocol from the proxy's `X-Forwarded-Proto` header, and session cookies are then marked `Secure` automatically (`SECURE_COOKIES=auto`):
+
+- Proxy on the same host (the Caddy and nginx examples below): `TRUST_PROXY=loopback`
+- Proxy reaching a Docker container over the bridge network: `TRUST_PROXY=uniquelocal`
+
+Without it, cookies are issued without `Secure`. Setting `SECURE_COOKIES=true` without `TRUST_PROXY` means no session cookie is issued at all.
 
 ### Caddy (recommended)
 
@@ -238,7 +282,7 @@ npm run build        # Full build: Svelte SPA then TypeScript server
 npm test             # Run all tests once
 npm run test:watch   # Vitest watch mode
 npm run lint         # Biome check (lint + format check)
-npm run backup       # Timestamped DB backup to data/backups/
+npm start -- --env-file .env backup  # Timestamped DB backup to <data dir>/backups/
 ```
 
 Run a single test file:
@@ -256,7 +300,7 @@ npx vitest run src/server/services/tax/matching.test.ts
 | # | Risk | Status |
 |---|---|---|
 | A01 Broken Access Control | All API routes require a valid session via `requireAuth`. Single-tenant design — `tenant_id` scoped on every query. No IDOR: IDs are validated against `tenant_id` before returning. | **Mitigated** |
-| A02 Cryptographic Failures | Passwords: argon2id with default cost parameters. Sessions: HttpOnly, `SameSite=Lax`, 8h idle timeout; `Secure` flag enabled in production. Field-level AES-256-GCM on sensitive columns. Session secret and encryption key are required env vars (server refuses to start without them). | **Mitigated** |
+| A02 Cryptographic Failures | Passwords: argon2id with default cost parameters. Sessions: HttpOnly, `SameSite=Lax`, 8h idle timeout; `Secure` flag set automatically when the request arrived over HTTPS. Field-level AES-256-GCM on sensitive columns. The session secret is a required env var and is rejected if it is a placeholder or too short (server refuses to start). | **Mitigated** |
 | A03 Injection | All DB queries use parameterised prepared statements — no string interpolation. Input validated via Fastify JSON schema before reaching route handlers. Decimal values validated with `/^\d+(\.\d+)?$/` before `big.js`. | **Mitigated** |
 | A04 Insecure Design | Single-user, self-hosted. No user enumeration: login uses constant-time password check against a dummy hash when username is unknown. CSRF synchronizer token on all state-changing requests. | **Mitigated** |
 | A05 Security Misconfiguration | `@fastify/helmet` sets strict CSP (`default-src 'self'`), `Referrer-Policy: same-origin`, and other security headers. `robots.txt` disallows all crawlers. Rate limiting: 200 req/min global; 10 req/15min on login; 5 req/15min on setup. | **Mitigated** |
@@ -270,5 +314,6 @@ npx vitest run src/server/services/tax/matching.test.ts
 
 - **This app is single-user and self-hosted.** Do not expose port 3000 directly — always place it behind a reverse proxy with TLS.
 - Keep your `.env` file out of version control (it is in `.gitignore`).
-- Back up the database regularly (`npm run backup`). The backup is a plain SQLite file — store it somewhere safe, preferably off-site.
-- Encrypted fields use a key derived from your passphrase. The plaintext key is never stored on disk.
+- Back up the database regularly (`tax-tracker backup`, or `BACKUP_SCHEDULE=daily`). A backup is a SQLite file that carries the key slots, so it opens only with the passphrase or recovery key that belongs to it — store it somewhere safe, preferably off-site. Backups taken before the storage-format upgrade, and plaintext archives, are readable by anyone who has them.
+- Encrypted fields use a random data key that is wrapped by your passphrase and by the recovery key. The plaintext data key is never stored on disk, and is held in memory only while a session is signed in (or permanently, if you opted in to an unattended `ENCRYPTION_KEY` slot).
+- `config.json` (self-configured mode) holds the session secret and non-secret settings only, never key material. API keys entered in the UI are stored encrypted.
