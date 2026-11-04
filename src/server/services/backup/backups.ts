@@ -1,12 +1,4 @@
-import {
-  chmodSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-} from 'node:fs'
+import { chmodSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { Db } from '../../db/database.ts'
@@ -81,9 +73,8 @@ export function listBackups(dataDir: string): BackupInfo[] {
 
 // Resolves a name from a request to a path, only if it is one of the listed backups.
 export function backupPath(dataDir: string, name: string): string | undefined {
-  return isListed(name) && existsSync(join(backupDir(dataDir), name))
-    ? join(backupDir(dataDir), name)
-    : undefined
+  const listed = listBackups(dataDir).find((backup) => backup.name === name)
+  return listed ? join(backupDir(dataDir), listed.name) : undefined
 }
 
 function verifyCopy(path: string): void {

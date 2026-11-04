@@ -214,26 +214,45 @@ export interface StagedRestore extends BackupValidation {
 // for the next start (or the offline command) to swap in. The live database is not touched. A
 // file that still has write-ahead-log content beside it is refused: copying only the main file
 // would silently drop committed data.
-export async function stageRestore(
+export function stageRestoreFile(
   dbPath: string,
-  source: string | Buffer,
+  file: string,
   options: RestoreOptions = {},
+): Promise<StagedRestore> {
+  return stage(
+    dbPath,
+    (partial) => {
+      if (existsSync(`${file}-wal`)) {
+        throw new BadRequestError(
+          'That file has a write-ahead log beside it (-wal), so a plain copy would miss data. Use a backup made by Tax Tracker.',
+        )
+      }
+      copyFileSync(file, partial)
+    },
+    options,
+  )
+}
+
+// The upload route takes this one, so the request body never reaches a path expression.
+export function stageRestore(
+  dbPath: string,
+  contents: Buffer,
+  options: RestoreOptions = {},
+): Promise<StagedRestore> {
+  return stage(dbPath, (partial) => writeFileSync(partial, contents, { mode: 0o600 }), options)
+}
+
+async function stage(
+  dbPath: string,
+  writePartial: (partial: string) => void,
+  options: RestoreOptions,
 ): Promise<StagedRestore> {
   const dataDir = dirname(dbPath)
   const pending = pendingRestorePath(dataDir)
   // Unique per call: two uploads in flight must not share, and so overwrite, one file.
   const partial = `${pending}.${randomBytes(4).toString('hex')}.partial`
   try {
-    if (typeof source === 'string') {
-      if (existsSync(`${source}-wal`)) {
-        throw new BadRequestError(
-          'That file has a write-ahead log beside it (-wal), so a plain copy would miss data. Use a backup made by Tax Tracker.',
-        )
-      }
-      copyFileSync(source, partial)
-    } else {
-      writeFileSync(partial, source, { mode: 0o600 })
-    }
+    writePartial(partial)
     const validation = validateBackupFile(partial)
     const live = liveState(dbPath)
     assertNoDowngrade(live, validation)

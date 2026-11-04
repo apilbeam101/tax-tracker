@@ -165,12 +165,12 @@ export async function encryptArchive(
 
 // One entry per format version that has been superseded: it turns that version's archive into the
 // next one, so old exports stay importable after the schema changes. Empty while only v1 exists.
-const ARCHIVE_MIGRATIONS: Record<number, (archive: Archive) => Archive> = {}
+const ARCHIVE_MIGRATIONS = new Map<number, (archive: Archive) => Archive>()
 
 function migrateArchive(archive: Archive): Archive {
   let current = archive
   while (current.formatVersion < ARCHIVE_VERSION) {
-    const step = ARCHIVE_MIGRATIONS[current.formatVersion]
+    const step = ARCHIVE_MIGRATIONS.get(current.formatVersion)
     if (!step)
       throw new BadRequestError(`Archive format version ${current.formatVersion} is not supported`)
     current = step(current)

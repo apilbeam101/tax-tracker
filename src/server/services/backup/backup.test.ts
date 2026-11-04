@@ -35,7 +35,7 @@ import {
   applyPendingRestore,
   cancelPendingRestore,
   pendingRestorePath,
-  stageRestore,
+  stageRestoreFile,
   validateBackupFile,
 } from './restore.ts'
 import { startBackupSchedule } from './scheduler.ts'
@@ -262,7 +262,7 @@ describe('restore', () => {
     other.exec("INSERT INTO instrument (tenant_id, ticker, name) VALUES (1, 'OLD', 'Old')")
     other.close()
 
-    await stageRestore(dbPath, otherPath)
+    await stageRestoreFile(dbPath, otherPath)
     expect(existsSync(pendingRestorePath(dir))).toBe(true)
 
     const result = await applyPendingRestore(dbPath, () => {})
@@ -288,7 +288,7 @@ describe('restore', () => {
     other.exec("INSERT INTO instrument (tenant_id, ticker, name) VALUES (1, 'OLD', 'Old')")
     other.close()
 
-    await stageRestore(dbPath, otherPath)
+    await stageRestoreFile(dbPath, otherPath)
     const db = await initDb(dbPath)
     expect(db.prepare('SELECT ticker FROM instrument').all()).toEqual([{ ticker: 'OLD' }])
     db.close()
@@ -323,7 +323,7 @@ describe('restore', () => {
     await protectedBackup(dbPath)
     const unprotected = join(dir, 'u.db')
     ;(await freshDb(unprotected)).close()
-    await expect(stageRestore(dbPath, unprotected)).rejects.toThrow(/no key slots/)
+    await expect(stageRestoreFile(dbPath, unprotected)).rejects.toThrow(/no key slots/)
     expect(existsSync(pendingRestorePath(dir))).toBe(false)
   })
 
@@ -331,7 +331,7 @@ describe('restore', () => {
     ;(await freshDb()).close()
     const older = join(dir, 'older.db')
     ;(await freshDb(older)).close()
-    expect(await stageRestore(dbPath, older)).toEqual({
+    expect(await stageRestoreFile(dbPath, older)).toEqual({
       protected: false,
       keyId: null,
       sameKeys: null,
@@ -654,7 +654,7 @@ describe('restore hardening', () => {
     g.exec("INSERT INTO instrument (tenant_id, ticker, name) VALUES (1, 'GOOD', 'Good')")
     g.close()
 
-    await stageRestore(dbPath, good)
+    await stageRestoreFile(dbPath, good)
     const result = await applyPendingRestore(dbPath, () => {})
     expect(result).toMatchObject({ applied: true })
     const restored = new DatabaseSync(dbPath, { readOnly: true })
@@ -670,12 +670,12 @@ describe('restore hardening', () => {
     await protectedAt(backup, { unattended: 'k'.repeat(40) })
     ;(await freshDb()).close()
 
-    await expect(stageRestore(dbPath, backup, { encryptionKey: 'x'.repeat(40) })).rejects.toThrow(
-      /does not open the backup's unattended/,
-    )
+    await expect(
+      stageRestoreFile(dbPath, backup, { encryptionKey: 'x'.repeat(40) }),
+    ).rejects.toThrow(/does not open the backup's unattended/)
     expect(existsSync(pendingRestorePath(dir))).toBe(false)
     await expect(
-      stageRestore(dbPath, backup, { encryptionKey: 'k'.repeat(40) }),
+      stageRestoreFile(dbPath, backup, { encryptionKey: 'k'.repeat(40) }),
     ).resolves.toMatchObject({ protected: true })
 
     const log = vi.fn()
@@ -693,26 +693,26 @@ describe('restore hardening', () => {
     const { backup } = await import('node:sqlite')
     await backup(live, same)
     live.close()
-    expect(await stageRestore(dbPath, same)).toMatchObject({ protected: true, sameKeys: true })
+    expect(await stageRestoreFile(dbPath, same)).toMatchObject({ protected: true, sameKeys: true })
 
     // Cancelled first: a staged file in this folder would be applied when the next database opens.
     cancelPendingRestore(dir)
     const other = join(dir, 'other.db')
     await protectedAt(other)
-    expect(await stageRestore(dbPath, other)).toMatchObject({ sameKeys: false })
+    expect(await stageRestoreFile(dbPath, other)).toMatchObject({ sameKeys: false })
   })
 
   it('refuses protected data with no account to sign in to', async () => {
     const orphan = join(dir, 'orphan.db')
     await protectedAt(orphan, { user: false })
-    await expect(stageRestore(dbPath, orphan)).rejects.toThrow(/no account/)
+    await expect(stageRestoreFile(dbPath, orphan)).rejects.toThrow(/no account/)
   })
 
   it('refuses a source that still has a write-ahead log beside it', async () => {
     const source = join(dir, 'wal.db')
     ;(await freshDb(source)).close()
     writeFileSync(`${source}-wal`, 'pending frames')
-    await expect(stageRestore(dbPath, source)).rejects.toThrow(/write-ahead log/)
+    await expect(stageRestoreFile(dbPath, source)).rejects.toThrow(/write-ahead log/)
   })
 
   async function stagedOver(live: string, ticker: string) {
@@ -723,7 +723,7 @@ describe('restore hardening', () => {
     const other = await freshDb(incoming)
     other.exec(`INSERT INTO instrument (tenant_id, ticker, name) VALUES (1, '${ticker}', 'In')`)
     other.close()
-    await stageRestore(dbPath, incoming)
+    await stageRestoreFile(dbPath, incoming)
   }
 
   const tickers = (path: string) => {

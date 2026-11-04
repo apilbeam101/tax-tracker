@@ -11,7 +11,7 @@ import {
   parseArchive,
 } from '../services/backup/archive.ts'
 import { createBackup } from '../services/backup/backups.ts'
-import { applyPendingRestore, stageRestore } from '../services/backup/restore.ts'
+import { applyPendingRestore, stageRestoreFile } from '../services/backup/restore.ts'
 import { serverLockIsFresh } from '../services/backup/server-lock.ts'
 import { recalcAllInstruments } from '../services/tax/recalc.ts'
 import { claimDataDir, RUNNING_MESSAGE } from './data-dir-lock.ts'
@@ -43,7 +43,7 @@ export async function runRestore(env: NodeJS.ProcessEnv, file: string): Promise<
   const { dbPath, dataDir } = dataPaths(env)
   await claimDataDir(dataDir)
   const { encryptionKey } = readUnattendedKeyIfAny(env)
-  await userFacing(() => stageRestore(dbPath, resolve(file), { encryptionKey }))
+  await userFacing(() => stageRestoreFile(dbPath, resolve(file), { encryptionKey }))
   const lines: string[] = []
   const result = await applyPendingRestore(dbPath, (m) => lines.push(m), {
     encryptionKey,

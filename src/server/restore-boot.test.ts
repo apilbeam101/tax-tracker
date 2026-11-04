@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { hashPassword } from './auth/password.ts'
 import { createKeySlots } from './crypto/keyslots.ts'
 import { initDb } from './db/database.ts'
-import { stageRestore } from './services/backup/restore.ts'
+import { stageRestoreFile } from './services/backup/restore.ts'
 
 // The real buildApp, started over a data directory in which a restore has been staged: the swap
 // happens before the database is opened, the restored data starts locked, and the restored
@@ -59,7 +59,7 @@ describe('starting the app over a staged restore', () => {
 
     const backupPath = join(dir, 'incoming', 'incoming.db')
     await install(backupPath, 'restored', 'restored install passphrase')
-    const staged = await stageRestore(livePath, backupPath)
+    const staged = await stageRestoreFile(livePath, backupPath)
     expect(staged).toMatchObject({ protected: true, sameKeys: false })
 
     const { default: Fastify } = await import('fastify')
