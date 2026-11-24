@@ -23,6 +23,10 @@ All notable changes to this project are documented in this file. Format follows 
 
 - `deploy/docker-compose.yml`, replaced by `deploy/compose/docker-compose.yml` (a named data volume instead of a bind mount, so no `chown` step).
 
+### Fixed
+
+- Two upgrades to the encrypted storage format started at the same moment (a double click, or two tabs) could leave the second one reporting an internal error. It now reports that the database is already encrypted.
+
 ## [0.1.0-rc.1] - 2026-11-04
 
 ### Added

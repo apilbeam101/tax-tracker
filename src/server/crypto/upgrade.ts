@@ -217,6 +217,11 @@ export async function upgradeToEncrypted(
     backupPath = await writePreEncryptionBackup(db, options.backupDir)
   } catch (err) {
     prepared.dek.fill(0)
+    // The winner of two simultaneous upgrades scrubs the file (checkpoint and VACUUM) right after
+    // it commits, which can make the loser's copy fail. That is the conflict, not a broken disk.
+    if (keyring.isProtected || hasKeySlots(db)) {
+      throw new ConflictError(ALREADY_ENCRYPTED, ALREADY_ENCRYPTED_CODE)
+    }
     throw err
   }
 
