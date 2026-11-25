@@ -1,6 +1,6 @@
 {
   "name": "uk-tax-tracker",
-  "version": "0.1.0-rc.2",
+  "version": "0.1.0",
   "description": "UK share tax liability tracker",
   "license": "MIT",
   "repository": {

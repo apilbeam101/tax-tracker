@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-25
+
+The first stable release. What it does, and how to install it, is described in the release notes (`docs/releases/v0.1.0.md`). The detailed history of how it got here is in the two release candidates below.
+
 ## [0.1.0-rc.2] - 2026-11-24
 
 ### Added
