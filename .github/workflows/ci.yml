@@ -118,6 +118,133 @@ jobs:
         env:
           SMOKE_NPM_VERSION: "12"
 
+  # The installers run for real against the packed tarball: install, start (a launchd agent on
+  # macOS, a scheduled task on Windows), probe /health, uninstall, and check that the data stays.
+  installers:
+    name: installer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: pack the tarball
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/pack"
+          npm pack --pack-destination "$RUNNER_TEMP/pack" --silent
+          ls "$RUNNER_TEMP/pack"
+
+      - name: shellcheck
+        if: runner.os == 'Linux'
+        run: shellcheck install/install.sh
+
+      - name: install, run and uninstall (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -eu
+          tarball=$(ls "$RUNNER_TEMP"/pack/*.tgz)
+          data="$RUNNER_TEMP/tt-data"
+          sh install/install.sh --yes --no-service --port 3456 --prefix "$RUNNER_TEMP/npm-global" --data-dir "$data" --from-tarball "$tarball"
+          "$RUNNER_TEMP/npm-global/bin/tax-tracker" start --port 3456 --data-dir "$data" &
+          server=$!
+          for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:3456/health && break; sleep 1; done
+          curl -fsS http://127.0.0.1:3456/health
+          kill "$server"
+          # No --prefix or --data-dir: the uninstall must act on what the install recorded.
+          out=$(sh install/install.sh --uninstall)
+          echo "$out"
+          printf '%s' "$out" | grep -F "Your data is still in $data"
+          test ! -e "$RUNNER_TEMP/npm-global/bin/tax-tracker"
+          test -f "$data/config.json"
+          # A purge refuses a folder that is not this app's data, before it asks anything.
+          mkdir -p "$RUNNER_TEMP/not-ours" && touch "$RUNNER_TEMP/not-ours/keep.txt"
+          if sh install/install.sh --uninstall --purge --data-dir "$RUNNER_TEMP/not-ours"; then echo "purge of a foreign folder was not refused"; exit 1; fi
+          test -f "$RUNNER_TEMP/not-ours/keep.txt"
+
+      - name: install, run and uninstall (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -eu
+          tarball=$(ls "$RUNNER_TEMP"/pack/*.tgz)
+          data="$RUNNER_TEMP/tt-data"
+          plist="$HOME/Library/LaunchAgents/com.apilbeam101.tax-tracker.plist"
+          sh install/install.sh --yes --port 3456 --prefix "$RUNNER_TEMP/npm-global" --data-dir "$data" --from-tarball "$tarball"
+          curl -fsS http://127.0.0.1:3456/health
+          test -f "$plist"
+          test -f "$HOME/Desktop/UK Tax Tracker.webloc"
+          # No --prefix or --data-dir: the uninstall must act on what the install recorded.
+          out=$(sh install/install.sh --uninstall)
+          echo "$out"
+          printf '%s' "$out" | grep -F "Your data is still in $data"
+          test ! -e "$plist"
+          test ! -e "$HOME/Desktop/UK Tax Tracker.webloc"
+          test ! -e "$RUNNER_TEMP/npm-global/bin/tax-tracker"
+          if curl -fsS --max-time 3 http://127.0.0.1:3456/health; then echo "still answering after uninstall"; exit 1; fi
+          test -f "$data/config.json"
+          mkdir -p "$RUNNER_TEMP/not-ours" && touch "$RUNNER_TEMP/not-ours/keep.txt"
+          if sh install/install.sh --uninstall --purge --data-dir "$RUNNER_TEMP/not-ours"; then echo "purge of a foreign folder was not refused"; exit 1; fi
+          test -f "$RUNNER_TEMP/not-ours/keep.txt"
+
+      - name: PSScriptAnalyzer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+          $findings = Invoke-ScriptAnalyzer -Path install/install.ps1 -Severity Error, Warning
+          if ($findings) {
+            $findings | Format-Table RuleName, Severity, Line, Message -AutoSize -Wrap | Out-String | Write-Host
+            exit 1
+          }
+
+      - name: install, run and uninstall (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tarball = (Get-ChildItem "$env:RUNNER_TEMP\pack\*.tgz").FullName
+          $common = @('-Prefix', "$env:RUNNER_TEMP\npm-global", '-AppDir', "$env:RUNNER_TEMP\tt-app", '-ShortcutDir', "$env:RUNNER_TEMP\tt-shortcuts")
+          $data = "$env:RUNNER_TEMP\tt-data"
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File install\install.ps1 -Yes -Port 3456 -DataDir $data -FromTarball $tarball @common
+          if ($LASTEXITCODE -ne 0) { throw 'install.ps1 failed' }
+          Invoke-RestMethod -Uri http://127.0.0.1:3456/health | Out-Host
+          if (-not (Get-ScheduledTask -TaskName 'UK Tax Tracker' -ErrorAction SilentlyContinue)) { throw 'scheduled task missing' }
+          if (-not (Test-Path "$env:RUNNER_TEMP\tt-shortcuts\UK Tax Tracker.url")) { throw 'shortcut missing' }
+          # Windows PowerShell 5.1 turns anything a native command writes to stderr into an error
+          # when its output is redirected, so the checks below throw explicitly instead.
+          $ErrorActionPreference = 'Continue'
+          # No -Prefix, -DataDir or -TaskName: the uninstall must act on what the install recorded.
+          $out = powershell.exe -NoProfile -ExecutionPolicy Bypass -File install\install.ps1 -Uninstall -Yes -AppDir "$env:RUNNER_TEMP\tt-app" -ShortcutDir "$env:RUNNER_TEMP\tt-shortcuts" 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "uninstall failed: $out" }
+          Write-Host $out
+          if (-not $out.Contains("Your data is still in $data")) { throw 'uninstall did not report the data folder that was chosen at install' }
+          if (Get-ScheduledTask -TaskName 'UK Tax Tracker' -ErrorAction SilentlyContinue) { throw 'scheduled task still present' }
+          if (Test-Path "$env:RUNNER_TEMP\npm-global\node_modules\uk-tax-tracker") { throw 'package still installed' }
+          if (Test-Path "$env:RUNNER_TEMP\tt-app") { throw 'app folder still present' }
+          if (-not (Test-Path "$data\config.json")) { throw 'data folder was removed' }
+          $answered = $false
+          try { Invoke-RestMethod -Uri http://127.0.0.1:3456/health -TimeoutSec 3 | Out-Null; $answered = $true } catch { Write-Host 'not answering, as expected' }
+          if ($answered) { throw 'still answering after uninstall' }
+          # A purge refuses a folder that is not this app's data, before it asks anything.
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\not-ours" | Out-Null
+          Set-Content -Path "$env:RUNNER_TEMP\not-ours\keep.txt" -Value 'x'
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File install\install.ps1 -Uninstall -Purge -Yes -DataDir "$env:RUNNER_TEMP\not-ours" -AppDir "$env:RUNNER_TEMP\tt-app" -ShortcutDir "$env:RUNNER_TEMP\tt-shortcuts" 2>&1 | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw 'purge of a foreign folder was not refused' }
+          if (-not (Test-Path "$env:RUNNER_TEMP\not-ours\keep.txt")) { throw 'a foreign folder was deleted' }
+          # The step would otherwise end with the exit code of the last native command, which is the
+          # refused purge above and is meant to be 1.
+          exit 0
+
   audit:
     name: npm audit (prod deps)
     runs-on: ubuntu-latest

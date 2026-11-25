@@ -1,0 +1,65 @@
+name: A tax figure looks wrong
+description: A gain, dividend tax, allowance or other calculated figure does not look right
+labels: [tax-calculation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **This repository is public. Replace your real figures with made-up ones.** Describe a small scenario that gives the same kind of result: invented quantities, prices and dates, and a fictional ticker. Never post your actual transactions, holdings or amounts.
+
+        The app is not tax advice. If you are unsure what the right answer is, say so; a report that explains the doubt is still useful.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+      options:
+        - Capital gains: share matching (same day, 30 days, Section 104 pool)
+        - Capital gains: rates, allowance or tax year
+        - Dividends or foreign tax credit
+        - RSU vests
+        - ESPP purchases
+        - Splits, capital returns, rights issues or transfers
+        - Currency conversion
+        - The annual report or computation
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: tax-year
+    attributes:
+      label: Tax year
+      description: For example 2024-25.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `tax-tracker --version`.
+    validations:
+      required: true
+  - type: textarea
+    id: scenario
+    attributes:
+      label: The scenario, with made-up figures
+      description: The transactions that lead to the result, as a short list or table, in date order.
+    validations:
+      required: true
+  - type: textarea
+    id: shown
+    attributes:
+      label: What the app shows
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and why
+      description: Your calculation, or the HMRC guidance you are relying on, with a link if you can.
+    validations:
+      required: true
+  - type: checkboxes
+    id: no-real-data
+    attributes:
+      label: Before you submit
+      options:
+        - label: The figures above are made up, and this report contains no real financial data.
+          required: true

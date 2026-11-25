@@ -1,0 +1,32 @@
+# EXAMPLE for the ingress-nginx controller. Copy, set the host and TLS secret, and apply the copy.
+# Other controllers need their own equivalents of the annotation below.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tax-tracker
+  namespace: tax-tracker
+  labels:
+    app.kubernetes.io/name: tax-tracker
+  annotations:
+    # A restore uploaded from the app is the raw database file, up to 500 MB. ingress-nginx
+    # rejects request bodies over 1 MB by default, which fails the upload with a 413.
+    nginx.ingress.kubernetes.io/proxy-body-size: 512m
+    # cert-manager, if you use it:
+    # cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - tax.example.com
+      secretName: tax-tracker-tls
+  rules:
+    - host: tax.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tax-tracker
+                port:
+                  name: http

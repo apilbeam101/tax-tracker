@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tax-tracker-config
+  namespace: tax-tracker
+  labels:
+    app.kubernetes.io/name: tax-tracker
+data:
+  # The container reaches the pod network, not the pod's own loopback.
+  HOST: "0.0.0.0"
+  PORT: "3000"
+  LOG_LEVEL: "warn"
+
+  # Env-supplied mode (the image default): every setting comes from here and the Secret, and the
+  # app never writes configuration. Set to "true" instead to let the app keep a generated session
+  # secret in the data volume and take API keys under Settings; then the Secret below is not
+  # needed and the SESSION_SECRET_FILE line can go.
+  AUTO_CONFIG: "false"
+  SESSION_SECRET_FILE: /etc/tax-tracker/secrets/session-secret
+
+  # Daily backup into <data dir>/backups. It is on by default only in self-configured mode, so it
+  # is requested here. cronjob-backup.example.yaml is an alternative that runs outside the pod.
+  BACKUP_SCHEDULE: "daily"
+
+  # A restore uploaded from the app is applied at the next start. The app exits by itself once it
+  # is staged and the kubelet restarts the container.
+  RESTORE_RESTART: "exit"
+
+  # Cookies are marked Secure when the request reached the ingress over HTTPS. Pod and ingress
+  # controller addresses are private, so trusting private ranges matches how traffic arrives.
+  # Narrow it to your ingress controller's pod CIDR if you know it.
+  SECURE_COOKIES: "auto"
+  TRUST_PROXY: "uniquelocal"
+
+  FX_RATE_POLICY: "hmrc-monthly"
+
+  # Optional API keys, from files in the Secret (add the keys to secret.example.yaml first; a
+  # *_FILE that points at a missing file stops the app from starting):
+  # TIINGO_API_KEY_FILE: /etc/tax-tracker/secrets/tiingo-api-key
+  # ALPHA_VANTAGE_API_KEY_FILE: /etc/tax-tracker/secrets/alpha-vantage-api-key
+
+  # Optional unattended unlock: the data unlocks itself at startup, so the key sits next to the
+  # data in the cluster. Leave it out and the data stays locked after every restart until
+  # someone signs in. Add the key to the Secret first, as above.
+  # ENCRYPTION_KEY_FILE: /etc/tax-tracker/secrets/encryption-key

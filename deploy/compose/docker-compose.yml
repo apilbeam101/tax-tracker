@@ -1,0 +1,114 @@
+# Run the published image:
+#   cp .env.example .env        (optional: pin a version, change the port, set DOMAIN)
+#   docker compose up -d
+# then open http://127.0.0.1:3000 and create your account. The first-run screen shows a recovery
+# key; store it somewhere other than this host.
+#
+# With automatic HTTPS (a Caddy sidecar, needs DOMAIN pointing at this host and ports 80/443 open):
+#   docker compose --profile https up -d
+#
+# One-off commands run in the same image:
+#   docker compose run --rm tax-tracker info
+#   docker compose exec tax-tracker tax-tracker backup
+#
+# Building from source instead of pulling: add -f docker-compose.build.yml (see that file).
+name: tax-tracker
+
+services:
+  tax-tracker:
+    # Pin at least the minor tag in production (the default below). The monthly rebuild refreshes
+    # the minor and major tags with base-image security patches; an exact tag (for example 0.1.0)
+    # never changes, so it stays reproducible but does not receive those patches. For the strongest
+    # guarantee pin a digest (image@sha256:...).
+    image: ghcr.io/apilbeam101/tax-tracker:${TAX_TRACKER_VERSION:-0.1}
+    restart: unless-stopped
+    # tini as PID 1: plain `node` as PID 1 ignores SIGTERM, so a stop would wait out the timeout
+    # and kill the process, interrupting any write in flight.
+    init: true
+    environment:
+      # The image defaults to env-supplied mode. Here the app keeps a generated session secret in
+      # config.json inside the data volume, API keys can be entered under Settings, and a daily
+      # backup is on by default.
+      AUTO_CONFIG: "true"
+      # Loopback inside the container is not the host's loopback; without this the published port
+      # cannot reach the app even though the container's own health check stays green.
+      HOST: 0.0.0.0
+      # A restore uploaded from the app is applied at the next start. With this the app exits by
+      # itself once the restore is staged, and `restart:` brings it back.
+      RESTORE_RESTART: exit
+      # Only the Caddy sidecar (profile https) and the host's own loopback can reach the app, and
+      # both arrive from a private address, so their forwarded protocol can be trusted. Cookies
+      # are then marked Secure when the original request was HTTPS (SECURE_COOKIES=auto).
+      TRUST_PROXY: uniquelocal
+      # Unattended unlock is off by default: the data stays locked after every restart until
+      # someone signs in, and the key never sits next to the data. See the secrets block below.
+      # ENCRYPTION_KEY_FILE: /run/secrets/tax_tracker_encryption_key
+    ports:
+      # Loopback only. Publishing to 0.0.0.0 would expose the app over plain HTTP the moment this
+      # runs on a host without a firewall; use the https profile or a reverse proxy to reach it
+      # from elsewhere.
+      - "127.0.0.1:${TAX_TRACKER_PORT:-3000}:3000"
+    volumes:
+      # A named volume is created owned by the image's user (uid 10001), so no chown is needed.
+      # To use a host directory instead, replace this line with `./data:/app/data` and run
+      # `mkdir -p data && sudo chown -R 10001:10001 data` first: Docker does not apply the image's
+      # ownership to an existing host directory, and without it the app cannot open its database.
+      - tax-tracker-data:/app/data
+    tmpfs:
+      # SQLite spills large sort and index work to the temp directory, and the root filesystem is
+      # read-only below.
+      - /tmp
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Unattended unlock. Trade-off: the app unlocks itself at startup, so it can restart without
+    # anyone present, but anyone who can read the secret file and the data volume can read the
+    # data. Only opt in on a host you control; you must also opt in when encrypting in the app.
+    #   1. mkdir -p secrets && node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" > secrets/encryption_key
+    #   2. chown 10001:10001 secrets/encryption_key && chmod 0400 secrets/encryption_key
+    #      (a file secret keeps its host ownership, so uid 10001 must be able to read it)
+    #   3. uncomment ENCRYPTION_KEY_FILE above, the `secrets:` entry below, and the top-level block.
+    # secrets:
+    #   - tax_tracker_encryption_key
+
+  caddy:
+    profiles: [https]
+    # Pinned by version and digest. Bump both together.
+    image: caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
+    restart: unless-stopped
+    depends_on:
+      tax-tracker:
+        condition: service_healthy
+    environment:
+      # `localhost` (the default) serves a locally trusted certificate and never contacts a
+      # public certificate authority; set DOMAIN to your real name to get a Let's Encrypt one.
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    tmpfs:
+      - /tmp
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      # Binding ports 80 and 443.
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  tax-tracker-data:
+  caddy-data:
+  caddy-config:
+
+# secrets:
+#   tax_tracker_encryption_key:
+#     file: ./secrets/encryption_key

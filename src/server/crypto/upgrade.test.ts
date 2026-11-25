@@ -177,6 +177,33 @@ describe('upgrading an unencrypted database', () => {
     ).rejects.toBeInstanceOf(ConflictError)
   })
 
+  it('reports the conflict, not a failed safety copy, when another upgrade finishes during the copy', async () => {
+    const db = createTestDb()
+    const keyring = new Keyring({ protected: false })
+    // The safety copy cannot be made here: the folder it would go in is a file.
+    const blocker = join(tempDir(), 'not-a-folder')
+    writeFileSync(blocker, 'x')
+    // The key derivation options are read after the first checks and before the safety copy, so
+    // reading one stands in for a second upgrade completing in between.
+    const finishedElsewhere = {
+      kdf: 'argon2id' as const,
+      get memoryKiB() {
+        if (!keyring.isProtected) keyring.protect(Buffer.alloc(32))
+        return 64
+      },
+      timeCost: 1,
+      parallelism: 1,
+    }
+
+    await expect(
+      upgradeToEncrypted(db, keyring, {
+        passphrase: PASSPHRASE,
+        backupDir: join(blocker, 'copies'),
+        passphraseKdf: finishedElsewhere,
+      }),
+    ).rejects.toMatchObject({ statusCode: 409, code: 'ALREADY_ENCRYPTED' })
+  })
+
   it('refuses a database that already holds encrypted values but has no key slots', async () => {
     const { db } = await loadAndUpgrade()
     db.exec('DELETE FROM key_slot')

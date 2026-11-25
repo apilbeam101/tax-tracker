@@ -1,0 +1,11 @@
+{
+	# The admin endpoint is not needed and is not published.
+	admin off
+}
+
+{$DOMAIN:localhost} {
+	encode zstd gzip
+	# Caddy sets X-Forwarded-For/Proto/Host and replaces any value a client sent, which is what
+	# lets the app (TRUST_PROXY) see the original protocol and mark cookies Secure.
+	reverse_proxy tax-tracker:3000
+}

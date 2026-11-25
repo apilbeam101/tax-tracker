@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template for a per-user LaunchAgent (~/Library/LaunchAgents/com.apilbeam101.tax-tracker.plist).
+  The macOS installer fills in the placeholders; to use it by hand, replace:
+    __NODE__     absolute path to node (`command -v node`; /opt/homebrew/bin/node or
+                 /usr/local/bin/node with Homebrew)
+    __CLI__      absolute path to the package's cli.js
+                 (`$(npm root -g)/uk-tax-tracker/dist/server/cli.js`)
+    __LOG_DIR__  an existing folder for the log, for example ~/Library/Logs/tax-tracker
+  then: launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.apilbeam101.tax-tracker.plist
+  Stop and remove it with: launchctl bootout gui/$(id -u)/com.apilbeam101.tax-tracker
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.apilbeam101.tax-tracker</string>
+
+	<!-- Node and the script are given as absolute paths: launchd's PATH is minimal and does not
+	     include Homebrew, which a `#!/usr/bin/env node` shebang would need. The command defaults
+	     to self-configured mode and the per-user data directory. -->
+	<key>ProgramArguments</key>
+	<array>
+		<string>__NODE__</string>
+		<string>__CLI__</string>
+		<string>start</string>
+	</array>
+
+	<key>RunAtLoad</key>
+	<true/>
+
+	<!-- Unconditional: a restore uploaded from the app makes the app exit with status 0 so that it
+	     is restarted with the restored database, and a conditional KeepAlive such as
+	     SuccessfulExit=false would not restart it after that clean exit. ThrottleInterval keeps a
+	     start that fails straight away (bad configuration) from spinning. -->
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>NODE_ENV</key>
+		<string>production</string>
+		<key>RESTORE_RESTART</key>
+		<string>exit</string>
+		<key>LOG_LEVEL</key>
+		<string>warn</string>
+	</dict>
+
+	<!-- Owner-only files: the log can name the data directory. 63 is octal 077. -->
+	<key>Umask</key>
+	<integer>63</integer>
+
+	<key>StandardOutPath</key>
+	<string>__LOG_DIR__/tax-tracker.log</string>
+	<key>StandardErrorPath</key>
+	<string>__LOG_DIR__/tax-tracker.log</string>
+</dict>
+</plist>

@@ -1,0 +1,65 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **This repository is public.** Do not paste real financial data (transactions, holdings, amounts, or tickers that identify you), passphrases, recovery keys, session secrets or API keys. If the problem depends on data, rebuild it with made-up figures and fictional tickers.
+
+        Found a security problem? Do not open an issue. Use **Report a vulnerability** on the Security tab instead.
+
+        For installation problems, try the [troubleshooting guide](https://github.com/apilbeam101/tax-tracker/blob/master/docs/TROUBLESHOOTING.md) first.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `tax-tracker --version`, or the image tag if you run it in a container.
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Installer script on macOS
+        - Installer script on Windows
+        - Installer script on Linux
+        - npx
+        - Docker or Docker Compose
+        - Kubernetes
+        - npm and systemd on a server
+        - From source
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and Node.js version
+      description: For example "Windows 11, Node.js 26.12" or "Raspberry Pi OS, Docker 27".
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `tax-tracker doctor`
+      description: It never prints secrets, but read it before posting. In a container use `docker compose run --rm tax-tracker doctor`.
+      render: text
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, and what you saw instead of what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest set of steps that shows the problem, using made-up data.
+  - type: checkboxes
+    id: no-real-data
+    attributes:
+      label: Before you submit
+      options:
+        - label: This report contains no real financial data, passphrases, recovery keys, secrets or API keys.
+          required: true

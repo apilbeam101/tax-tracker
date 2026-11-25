@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tax-tracker
+  labels:
+    app.kubernetes.io/name: tax-tracker
+    # Restricted is the strictest Pod Security Standard; the StatefulSet already meets it.
+    pod-security.kubernetes.io/enforce: restricted

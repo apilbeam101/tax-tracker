@@ -1,0 +1,10 @@
+# Build the image from this checkout instead of pulling it (contributors, air-gapped hosts):
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+services:
+  tax-tracker:
+    build:
+      context: ../..
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        IMAGE_VERSION: ${IMAGE_VERSION:-0.0.0-local}
+    image: tax-tracker:local
