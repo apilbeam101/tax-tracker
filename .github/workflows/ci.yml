@@ -76,6 +76,9 @@ jobs:
             test -f /app/dist/client/index.html
             test -x /usr/local/bin/tax-tracker
             [ "$(id -u)" = "10001" ]
+            for p in /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack; do
+              if [ -e "$p" ]; then echo "$p is in the image; the runtime only needs node" >&2; exit 1; fi
+            done
           '
 
       - name: start the image and probe /health

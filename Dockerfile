@@ -28,6 +28,16 @@ RUN npm run build
 FROM node:26-slim AS runtime
 WORKDIR /app
 
+# The running app needs node and nothing else. npm, npx and corepack come with the base image and
+# bring their own dependency tree, which image scanners report even though the app never runs it,
+# so they are removed. Debian security updates are applied here rather than waiting for a new
+# base image, so the monthly rebuild picks them up as soon as Debian publishes them.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+        /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+
 # AUTO_CONFIG=false keeps containers in env-supplied mode (secrets come from the environment or
 # *_FILE paths, the app never writes configuration); the CLI that is now the entrypoint would
 # otherwise default to self-configured mode. Set AUTO_CONFIG=true to opt in.

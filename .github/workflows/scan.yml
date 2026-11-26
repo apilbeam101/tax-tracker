@@ -81,6 +81,8 @@ jobs:
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          # Without this the action ignores `severity` for SARIF output and uploads every level.
+          limit-severities-for-sarif: true
 
       # Under workflow_call the default category derives from the caller's workflow, which would
       # split alerts across two categories so neither closes the other's stale ones.
