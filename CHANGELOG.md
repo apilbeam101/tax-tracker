@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file. Format follows 
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-26
+
+### Security
+
+- The container image no longer contains npm, npx or corepack. They came with the base image and carry their own dependencies, some with published vulnerabilities; the app never runs them. The image is smaller as a result.
+- The container image applies Debian security updates when it is built, so the monthly rebuild includes them as soon as Debian publishes them instead of waiting for a new base image.
+
+### Fixed
+
+- The monthly image scan reported findings of every severity to the Security tab, rather than only high and critical ones as intended.
+
 ## [0.1.0] - 2026-11-25
 
 The first stable release. What it does, and how to install it, is described in the release notes (`docs/releases/v0.1.0.md`). The detailed history of how it got here is in the two release candidates below.
