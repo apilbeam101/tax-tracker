@@ -1,5 +1,31 @@
 # Deployability plan
 
+**Status: complete.** All eight phases are done and released. `0.1.0` (2026-11-25) was the first stable release; `0.1.1` (2026-11-26) followed to harden the container image after the first monthly scan. Work happened on `feat/deployability` (Phases 1 to 5, PR #9), `feat/deployment-artefacts` (Phases 6 to 8, PR #12) and `fix/image-hardening` (PR #13). This file stays as the record of what was planned and what was built; the maintained documentation is in `docs/` and the release procedure in [`docs/RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md).
+
+## Final status
+
+What shipped, against the goal below:
+
+- **One-command install** on macOS, Windows and Linux (`install/`), attached to each release with checksums and build attestations, and run against the packed package on all three systems in CI.
+- **Containers and servers:** a multi-arch image on GHCR and Docker Hub with provenance and per-platform SBOMs, minor and major tags refreshed by a monthly rebuild and scan, plus Compose, Kubernetes, systemd and launchd files (`deploy/`).
+- **Data safety:** field-level encryption with passphrase, recovery and optional unattended key slots, backups (manual, daily, and before every migration, restore, import and key rotation), restore, encrypted archives and key rotation.
+- **Releases:** a tag re-verifies the commit, publishes the image, the npm package (trusted publishing, provenance) and a GitHub Release with written notes and the installers.
+- **Documentation and community files:** install, configuration, backup, security model, upgrading, troubleshooting and release guides; security policy, contributing guide, code of conduct, issue forms.
+
+Verified on the published releases: both image platforms and their attestations, the moving tags on both registries, the npm versions and provenance, the attested installers, and the Windows installer run end to end against the published package (on `0.1.0-rc.2`). The first monthly rebuild and scan were run by hand; after `0.1.1` the scan reports no open findings.
+
+Known gaps, none of them blocking:
+
+- **Clean-machine installs are untested.** The installers' Node-missing paths (Homebrew, the nodejs.org `.pkg`, winget) and the `~/.local` prefix fallback have not run on a machine without Node. CI runners already have Node.
+- **Deploy files not run for real:** a real `docker compose up` with the HTTPS profile, the Kubernetes manifests under the `restricted` Pod Security level, `systemd-analyze security` and a real unit start, and the `kubectl run --overrides`, `systemd-run` and `docker compose cp` commands in the guides.
+- **`svelte-check`** cannot be added until it supports TypeScript 7.
+- **The macOS Node `.pkg`** is pinned by SHA-256 but not signature-checked, and its version has to be refreshed by hand (see the release checklist).
+- **Housekeeping:** `DESIGN.md` and `IMPLEMENTATION.md` are still at the repository root; `npm run dev` does not load `.env` (the README documents `AUTO_CONFIG=true npm run dev`); some tests leave `tt-*` folders in the temp directory; npm keeps a `0.0.0-stage` placeholder version from the first publish.
+
+---
+
+The original plan follows.
+
 Branch: `feat/deployability`
 
 Goal: someone who is comfortable installing an app, but not with Node, Docker or `.env` files, can install tax-tracker with one command, keep their data safe, and upgrade without losing anything. The ops-style deployments (Docker, Kubernetes, systemd) become first-class at the same time, published from one tagged release. Encryption and secret handling are extended alongside, so that every install path gets the same protection for data at rest.
